@@ -1,12 +1,12 @@
 import SwiftUI
-import SwiftData
+import CoreData
 import SplitCore
 
 struct ExpenseFormView: View {
-    @Environment(\.modelContext) private var context
+    @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
 
-    let group: SpendingGroup
+    @ObservedObject var group: SpendingGroup
     var existing: Expense?
 
     @State private var title = ""
@@ -327,8 +327,8 @@ struct ExpenseFormView: View {
                 return
             }
 
-            let expense = existing ?? Expense(title: "", amountMinorUnits: 0, currencyCode: currencyCode)
-            if existing == nil { context.insert(expense) }
+            let expense = existing ?? Expense(context: context, title: "",
+                                              amountMinorUnits: 0, currencyCode: currencyCode)
             for share in expense.shares ?? [] { context.delete(share) }
             for item in expense.lineItems ?? [] { context.delete(item) }
 
@@ -344,16 +344,17 @@ struct ExpenseFormView: View {
             expense.recurrenceNextDate = recurrence.next(after: date)
             expense.payer = payer
             expense.group = group
-            expense.shares = shares.map { memberID, amount in
-                ExpenseShare(member: group.member(id: memberID),
+            expense.shares = Set(shares.map { memberID, amount in
+                ExpenseShare(context: context,
+                             member: group.member(id: memberID),
                              amountMinorUnits: amount,
                              inputValue: inputs[memberID] ?? 0)
-            }
-            expense.lineItems = isItemized ? itemDrafts.map { draft in
-                LineItem(name: draft.name,
+            })
+            expense.lineItems = isItemized ? Set(itemDrafts.map { draft in
+                LineItem(context: context, name: draft.name,
                          amountMinorUnits: Money(draft.amount, currencyCode: currencyCode).minorUnits,
                          participants: members.filter { draft.participantIDs.contains($0.id) })
-            } : []
+            }) : []
             try? context.save()
             dismiss()
         } catch let error as SplitError {

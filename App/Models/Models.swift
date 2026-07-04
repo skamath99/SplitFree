@@ -1,33 +1,45 @@
 import Foundation
-import SwiftData
+import CoreData
 import SplitCore
 
-// All models follow CloudKit-compatible rules (no unique constraints,
-// optional relationships with inverses, defaults on every attribute) so
-// sync + CKShare group sharing can be enabled without a schema migration.
+// Core Data + NSPersistentCloudKitContainer (not SwiftData) because shared
+// groups need CKShare, which SwiftData doesn't support. The model follows
+// CloudKit rules: every attribute optional or defaulted, every relationship
+// optional with an inverse, no unique constraints.
 
-@Model
-final class SpendingGroup {
-    var id: UUID = UUID()
-    var name: String = ""
-    var emoji: String = "👥"
-    var currencyCode: String = "USD"
-    var createdAt: Date = Date.now
-    @Relationship(deleteRule: .cascade, inverse: \Member.group)
-    var members: [Member]? = []
-    @Relationship(deleteRule: .cascade, inverse: \Expense.group)
-    var expenses: [Expense]? = []
-    @Relationship(deleteRule: .cascade, inverse: \Settlement.group)
-    var settlements: [Settlement]? = []
+@objc(SpendingGroup)
+final class SpendingGroup: NSManagedObject, Identifiable {
+    @NSManaged var id: UUID
+    @NSManaged var name: String
+    @NSManaged var emoji: String
+    @NSManaged var currencyCode: String
+    @NSManaged var createdAt: Date
+    @NSManaged var members: Set<Member>?
+    @NSManaged var expenses: Set<Expense>?
+    @NSManaged var settlements: Set<Settlement>?
 
-    init(name: String, emoji: String = "👥", currencyCode: String = "USD") {
+    override func awakeFromInsert() {
+        super.awakeFromInsert()
+        id = UUID()
+        createdAt = Date.now
+    }
+
+    convenience init(context: NSManagedObjectContext, name: String,
+                     emoji: String = "👥", currencyCode: String = "USD") {
+        self.init(context: context)
         self.name = name
         self.emoji = emoji
         self.currencyCode = currencyCode
     }
 
+    static func fetchAll() -> NSFetchRequest<SpendingGroup> {
+        let request = NSFetchRequest<SpendingGroup>(entityName: "SpendingGroup")
+        request.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
+        return request
+    }
+
     var sortedMembers: [Member] {
-        (members ?? []).sorted { ($0.isCurrentUser ? 0 : 1, $0.name) < ($1.isCurrentUser ? 0 : 1, $1.name) }
+        (members ?? []).sorted { ($0.isMe ? 0 : 1, $0.name) < ($1.isMe ? 0 : 1, $1.name) }
     }
 
     var sortedExpenses: [Expense] {
@@ -68,36 +80,72 @@ final class SpendingGroup {
     }
 }
 
-@Model
-final class Member {
-    var id: UUID = UUID()
-    var name: String = ""
-    var isCurrentUser: Bool = false
-    var colorHue: Double = 0.55
-    var group: SpendingGroup?
-    // CloudKit requires an inverse on every relationship; these exist for
-    // that rule and are rarely traversed directly.
-    @Relationship(inverse: \LineItem.participants)
-    var lineItems: [LineItem]? = []
-    @Relationship(inverse: \Expense.payer)
-    var paidExpenses: [Expense]? = []
-    @Relationship(inverse: \ExpenseShare.member)
-    var expenseShares: [ExpenseShare]? = []
-    @Relationship(inverse: \Settlement.from)
-    var settlementsSent: [Settlement]? = []
-    @Relationship(inverse: \Settlement.to)
-    var settlementsReceived: [Settlement]? = []
+@objc(Member)
+final class Member: NSManagedObject, Identifiable {
+    @NSManaged var id: UUID
+    @NSManaged var name: String
+    /// True for the member the group's *creator* made for themselves. Kept
+    /// for seeding, but "who am I" is answered per-device by CurrentUser —
+    /// in a shared group this flag belongs to someone else's device.
+    @NSManaged var isCurrentUser: Bool
+    @NSManaged var colorHue: Double
+    @NSManaged var group: SpendingGroup?
+    @NSManaged var lineItems: Set<LineItem>?
+    @NSManaged var paidExpenses: Set<Expense>?
+    @NSManaged var expenseShares: Set<ExpenseShare>?
+    @NSManaged var settlementsSent: Set<Settlement>?
+    @NSManaged var settlementsReceived: Set<Settlement>?
 
-    init(name: String, isCurrentUser: Bool = false, colorHue: Double = 0.55) {
+    override func awakeFromInsert() {
+        super.awakeFromInsert()
+        id = UUID()
+    }
+
+    convenience init(context: NSManagedObjectContext, name: String,
+                     isCurrentUser: Bool = false, colorHue: Double = 0.55) {
+        self.init(context: context)
         self.name = name
         self.isCurrentUser = isCurrentUser
         self.colorHue = colorHue
     }
 
-    var displayName: String { isCurrentUser ? "You" : name }
+    /// Whether this member is the person holding the device.
+    var isMe: Bool { CurrentUser.isMe(self) }
+
+    var displayName: String { isMe ? "You" : name }
     var initials: String {
         let parts = name.split(separator: " ").prefix(2)
         return parts.map { String($0.prefix(1)).uppercased() }.joined()
+    }
+}
+
+/// Per-device record of which member the device's owner is in each group.
+/// This can't be a synced attribute: in a shared group every participant is
+/// "You" on their own device and someone else on everyone else's.
+enum CurrentUser {
+    private static let key = "currentUserMemberIDs" // [groupID: memberID]
+
+    static func claim(_ member: Member) {
+        guard let groupID = member.group?.id else { return }
+        var map = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        map[groupID.uuidString] = member.id.uuidString
+        UserDefaults.standard.set(map, forKey: key)
+    }
+
+    static func isMe(_ member: Member) -> Bool {
+        guard let groupID = member.group?.id else { return member.isCurrentUser }
+        let map = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        if let claimed = map[groupID.uuidString] {
+            return claimed == member.id.uuidString
+        }
+        // No claim on this device (e.g. a group someone shared with us and
+        // we haven't picked ourselves yet): nobody is "You".
+        return false
+    }
+
+    static func hasClaim(in group: SpendingGroup) -> Bool {
+        let map = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        return map[group.id.uuidString] != nil
     }
 }
 
@@ -144,31 +192,43 @@ enum RecurrenceFrequency: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-@Model
-final class Expense {
-    var id: UUID = UUID()
-    var title: String = ""
-    var amountMinorUnits: Int = 0
-    var currencyCode: String = "USD"
-    var date: Date = Date.now
-    var categoryRaw: String = ExpenseCategory.general.rawValue
-    var notes: String = ""
-    var splitModeRaw: String = SplitMode.equal.rawValue
-    var isItemized: Bool = false
-    var recurrenceRaw: String = RecurrenceFrequency.none.rawValue
+@objc(Expense)
+final class Expense: NSManagedObject, Identifiable {
+    @NSManaged var id: UUID
+    @NSManaged var title: String
+    @NSManaged var amountMinorUnits: Int
+    @NSManaged var currencyCode: String
+    @NSManaged var date: Date
+    @NSManaged var categoryRaw: String
+    @NSManaged var notes: String
+    @NSManaged var splitModeRaw: String
+    @NSManaged var isItemized: Bool
+    @NSManaged var recurrenceRaw: String
     /// When this template expense should next be cloned. Nil for one-offs.
-    var recurrenceNextDate: Date?
-    var payer: Member?
-    var group: SpendingGroup?
-    @Relationship(deleteRule: .cascade, inverse: \ExpenseShare.expense)
-    var shares: [ExpenseShare]? = []
-    @Relationship(deleteRule: .cascade, inverse: \LineItem.expense)
-    var lineItems: [LineItem]? = []
+    @NSManaged var recurrenceNextDate: Date?
+    @NSManaged var payer: Member?
+    @NSManaged var group: SpendingGroup?
+    @NSManaged var shares: Set<ExpenseShare>?
+    @NSManaged var lineItems: Set<LineItem>?
 
-    init(title: String, amountMinorUnits: Int, currencyCode: String) {
+    override func awakeFromInsert() {
+        super.awakeFromInsert()
+        id = UUID()
+        date = Date.now
+    }
+
+    convenience init(context: NSManagedObjectContext, title: String,
+                     amountMinorUnits: Int, currencyCode: String) {
+        self.init(context: context)
         self.title = title
         self.amountMinorUnits = amountMinorUnits
         self.currencyCode = currencyCode
+    }
+
+    static func fetchAll() -> NSFetchRequest<Expense> {
+        let request = NSFetchRequest<Expense>(entityName: "Expense")
+        request.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
+        return request
     }
 
     var category: ExpenseCategory {
@@ -189,36 +249,54 @@ final class Expense {
     var money: Money { Money(minorUnits: amountMinorUnits, currencyCode: currencyCode) }
 }
 
-@Model
-final class ExpenseShare {
-    var id: UUID = UUID()
-    var amountMinorUnits: Int = 0
+@objc(ExpenseShare)
+final class ExpenseShare: NSManagedObject, Identifiable {
+    @NSManaged var id: UUID
+    @NSManaged var amountMinorUnits: Int
     /// The raw value the user typed for percent/shares modes, kept for editing.
-    var inputValue: Decimal = 0
-    var member: Member?
-    var expense: Expense?
+    @NSManaged private var inputValueRaw: NSDecimalNumber?
+    @NSManaged var member: Member?
+    @NSManaged var expense: Expense?
 
-    init(member: Member?, amountMinorUnits: Int, inputValue: Decimal = 0) {
+    override func awakeFromInsert() {
+        super.awakeFromInsert()
+        id = UUID()
+    }
+
+    convenience init(context: NSManagedObjectContext, member: Member?,
+                     amountMinorUnits: Int, inputValue: Decimal = 0) {
+        self.init(context: context)
         self.member = member
         self.amountMinorUnits = amountMinorUnits
         self.inputValue = inputValue
     }
+
+    var inputValue: Decimal {
+        get { inputValueRaw?.decimalValue ?? 0 }
+        set { inputValueRaw = NSDecimalNumber(decimal: newValue) }
+    }
 }
 
-@Model
-final class LineItem {
-    var id: UUID = UUID()
-    var name: String = ""
-    var amountMinorUnits: Int = 0
-    /// Members splitting this item equally. Many-to-many; CloudKit requires
-    /// the inverse (Member.lineItems).
-    var participants: [Member]? = []
-    var expense: Expense?
+@objc(LineItem)
+final class LineItem: NSManagedObject, Identifiable {
+    @NSManaged var id: UUID
+    @NSManaged var name: String
+    @NSManaged var amountMinorUnits: Int
+    /// Members splitting this item equally.
+    @NSManaged var participants: Set<Member>?
+    @NSManaged var expense: Expense?
 
-    init(name: String, amountMinorUnits: Int, participants: [Member]) {
+    override func awakeFromInsert() {
+        super.awakeFromInsert()
+        id = UUID()
+    }
+
+    convenience init(context: NSManagedObjectContext, name: String,
+                     amountMinorUnits: Int, participants: [Member]) {
+        self.init(context: context)
         self.name = name
         self.amountMinorUnits = amountMinorUnits
-        self.participants = participants
+        self.participants = Set(participants)
     }
 }
 
@@ -236,17 +314,25 @@ enum SettlementMethod: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-@Model
-final class Settlement {
-    var id: UUID = UUID()
-    var amountMinorUnits: Int = 0
-    var date: Date = Date.now
-    var methodRaw: String = SettlementMethod.appleCash.rawValue
-    var from: Member?
-    var to: Member?
-    var group: SpendingGroup?
+@objc(Settlement)
+final class Settlement: NSManagedObject, Identifiable {
+    @NSManaged var id: UUID
+    @NSManaged var amountMinorUnits: Int
+    @NSManaged var date: Date
+    @NSManaged var methodRaw: String
+    @NSManaged var from: Member?
+    @NSManaged var to: Member?
+    @NSManaged var group: SpendingGroup?
 
-    init(from: Member?, to: Member?, amountMinorUnits: Int, method: SettlementMethod) {
+    override func awakeFromInsert() {
+        super.awakeFromInsert()
+        id = UUID()
+        date = Date.now
+    }
+
+    convenience init(context: NSManagedObjectContext, from: Member?, to: Member?,
+                     amountMinorUnits: Int, method: SettlementMethod) {
+        self.init(context: context)
         self.from = from
         self.to = to
         self.amountMinorUnits = amountMinorUnits

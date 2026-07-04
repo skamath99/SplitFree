@@ -1,5 +1,5 @@
 import SwiftUI
-import SwiftData
+import CoreData
 import Charts
 import SplitCore
 
@@ -7,14 +7,16 @@ import SplitCore
 /// Chart design: magnitude data with identity on the axis, so a single hue
 /// carries the marks; the headline total is a stat tile, not a chart.
 struct InsightsView: View {
-    @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
-    @Query private var groups: [SpendingGroup]
+    @FetchRequest(fetchRequest: Expense.fetchAll(), animation: .default)
+    private var expenses: FetchedResults<Expense>
+    @FetchRequest(fetchRequest: SpendingGroup.fetchAll(), animation: .default)
+    private var groups: FetchedResults<SpendingGroup>
     @State private var selectedGroupID: UUID?
 
     private let displayCurrency = "USD"
 
     private var scopedExpenses: [Expense] {
-        guard let selectedGroupID else { return expenses }
+        guard let selectedGroupID else { return Array(expenses) }
         return expenses.filter { $0.group?.id == selectedGroupID }
     }
 

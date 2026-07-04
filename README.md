@@ -36,14 +36,17 @@ with whatever tool you like (a share button hands the request text to Messages,
 Venmo, mail, anything), and a payment only enters the ledger when you
 explicitly **mark it as paid**.
 
-**Why no database server.** Storage is SwiftData mirrored to **CloudKit** —
-Apple's free hosted storage, the "Game Center for data." Data syncs through the
-user's private iCloud database when they're signed in, and falls back to a
-device-local store otherwise (also forced in UI tests via `--local-store`). The
-models follow CloudKit's compatibility rules: no unique constraints, defaults
-everywhere, and an inverse on every relationship. Shared groups between users
-(`CKShare`) are the next step on the same infrastructure. No third-party
-servers, ever.
+**Why no database server.** Storage is Core Data on
+**NSPersistentCloudKitContainer** — Apple's free hosted storage, the
+"Game Center for data." Your own groups sync through your private iCloud
+database; **shared groups** ride `CKShare`: tap Share on a group, invite
+friends through the standard iCloud sheet, and everyone sees the same live
+ledger with real access control. (Core Data rather than SwiftData because
+SwiftData has no CKShare support.) UI tests force a plain local store via
+`--local-store`. The models follow CloudKit's compatibility rules: no unique
+constraints, defaults everywhere, and an inverse on every relationship.
+"Who am I" is a per-device claim, not a synced flag — in a shared group every
+participant is "You" on their own phone. No third-party servers, ever.
 
 **Money math.** All amounts are integer minor units (cents). Splits use
 largest-remainder allocation so every penny is accounted for deterministically.
@@ -74,8 +77,6 @@ same scheme.
 
 ## Roadmap
 
-- `CKShare` shared groups so friends see the same live ledger (private-database
-  sync is already in)
 - Live exchange rates (optional network fetch, still no server)
 - Expense detail view with per-person breakdown
 - Widgets / App Intents ("Add expense" from the Home Screen)

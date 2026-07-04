@@ -1,5 +1,5 @@
 import SwiftUI
-import SwiftData
+import CoreData
 import SplitCore
 
 /// Settle-up: shows the minimal transfer plan and records payments.
@@ -11,9 +11,9 @@ import SplitCore
 /// a share button hands the request to whatever tool they choose — and a
 /// payment is only recorded when the user explicitly marks it as paid.
 struct SettleUpView: View {
-    @Environment(\.modelContext) private var context
+    @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
-    let group: SpendingGroup
+    @ObservedObject var group: SpendingGroup
     @State private var recordingTransfer: Transfer?
     @State private var showingManualPayment = false
 
@@ -97,7 +97,7 @@ private struct TransferRow: View {
     private var toMember: Member? { group.member(id: transfer.to) }
     private var amountText: String { transfer.minorUnits.asMoney(group.currencyCode) }
     private var involvesMe: Bool {
-        fromMember?.isCurrentUser == true || toMember?.isCurrentUser == true
+        fromMember?.isMe == true || toMember?.isMe == true
     }
 
     var body: some View {
@@ -131,7 +131,7 @@ private struct TransferRow: View {
     /// Tool-agnostic settle-up text for the share sheet — the user picks
     /// Messages, Venmo, mail, or anything else themselves.
     private var shareText: String {
-        let paying = fromMember?.isCurrentUser == true
+        let paying = fromMember?.isMe == true
         return paying
             ? "Sending you \(amountText) to settle up for \(group.name)."
             : "Settle-up request: \(amountText) for \(group.name)."
@@ -139,7 +139,7 @@ private struct TransferRow: View {
 }
 
 struct RecordPaymentView: View {
-    @Environment(\.modelContext) private var context
+    @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
     let group: SpendingGroup
     @State var fromID: UUID?
@@ -196,13 +196,13 @@ struct RecordPaymentView: View {
 
     private func save() {
         guard let fromID, let toID else { return }
-        let settlement = Settlement(from: group.member(id: fromID),
+        let settlement = Settlement(context: context,
+                                    from: group.member(id: fromID),
                                     to: group.member(id: toID),
                                     amountMinorUnits: Money(amount, currencyCode: group.currencyCode).minorUnits,
                                     method: method)
         settlement.date = date
         settlement.group = group
-        context.insert(settlement)
         try? context.save()
         dismiss()
     }

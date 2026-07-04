@@ -1,14 +1,22 @@
 import SwiftUI
-import SwiftData
+import CoreData
+import CloudKit
 import SplitCore
 
 struct GroupDetailView: View {
-    @Environment(\.modelContext) private var context
-    @Bindable var group: SpendingGroup
+    @Environment(\.managedObjectContext) private var context
+    @ObservedObject var group: SpendingGroup
     @State private var showingAddExpense = false
     @State private var showingSettleUp = false
     @State private var showingMembers = false
     @State private var expenseToEdit: Expense?
+    @State private var shareToPresent: PreparedShare?
+    @State private var sharePreparationFailed = false
+
+    struct PreparedShare: Identifiable {
+        let id = UUID()
+        let share: CKShare
+    }
 
     var body: some View {
         List {
@@ -20,6 +28,11 @@ struct GroupDetailView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
+                    if PersistenceController.shared.isCloudBacked {
+                        Button("Share group", systemImage: "person.crop.circle.badge.plus") {
+                            prepareShare()
+                        }
+                    }
                     Button("Members", systemImage: "person.2") { showingMembers = true }
                     Button("Settle up", systemImage: "checkmark.circle") { showingSettleUp = true }
                 } label: {
@@ -61,6 +74,27 @@ struct GroupDetailView: View {
         }
         .sheet(isPresented: $showingMembers) {
             MembersView(group: group)
+        }
+        .sheet(item: $shareToPresent) { prepared in
+            CloudSharingView(share: prepared.share,
+                             container: CKContainer(identifier: PersistenceController.cloudKitContainerID),
+                             title: group.name)
+                .ignoresSafeArea()
+        }
+        .alert("Couldn't prepare the share", isPresented: $sharePreparationFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Check that you're signed into iCloud and try again.")
+        }
+    }
+
+    private func prepareShare() {
+        Task {
+            do {
+                shareToPresent = PreparedShare(share: try await PersistenceController.shared.share(group: group))
+            } catch {
+                sharePreparationFailed = true
+            }
         }
     }
 
@@ -115,8 +149,25 @@ struct GroupDetailView: View {
     }
 }
 
+/// The system iCloud sharing sheet: invite people, manage participants,
+/// stop sharing. Everyone invited sees the same live group.
+struct CloudSharingView: UIViewControllerRepresentable {
+    let share: CKShare
+    let container: CKContainer
+    let title: String
+
+    func makeUIViewController(context: Context) -> UICloudSharingController {
+        share[CKShare.SystemFieldKey.title] = title as CKRecordValue
+        let controller = UICloudSharingController(share: share, container: container)
+        controller.availablePermissions = [.allowReadWrite, .allowPrivate]
+        return controller
+    }
+
+    func updateUIViewController(_ controller: UICloudSharingController, context: Context) {}
+}
+
 struct ExpenseRow: View {
-    let expense: Expense
+    @ObservedObject var expense: Expense
 
     var body: some View {
         HStack(spacing: 12) {
@@ -147,21 +198,32 @@ struct ExpenseRow: View {
 }
 
 struct MembersView: View {
-    @Environment(\.modelContext) private var context
+    @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @Bindable var group: SpendingGroup
+    @ObservedObject var group: SpendingGroup
     @State private var newName = ""
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(group.sortedMembers) { member in
-                    HStack {
-                        MemberAvatar(member: member, size: 30)
-                        Text(member.displayName)
-                        Spacer()
-                        BalancePill(minorUnits: group.balances[member.id] ?? 0,
-                                    currencyCode: group.currencyCode)
+                Section {
+                    ForEach(group.sortedMembers) { member in
+                        HStack {
+                            MemberAvatar(member: member, size: 30)
+                            Text(member.displayName)
+                            Spacer()
+                            BalancePill(minorUnits: group.balances[member.id] ?? 0,
+                                        currencyCode: group.currencyCode)
+                        }
+                        .contextMenu {
+                            Button("This is me", systemImage: "person.crop.circle.badge.checkmark") {
+                                CurrentUser.claim(member)
+                            }
+                        }
+                    }
+                } footer: {
+                    if !CurrentUser.hasClaim(in: group) {
+                        Text("Joined this group from an invite? Touch and hold your name and choose \"This is me\".")
                     }
                 }
                 Section {
@@ -170,8 +232,9 @@ struct MembersView: View {
                         Button("Add") {
                             let trimmed = newName.trimmingCharacters(in: .whitespaces)
                             guard !trimmed.isEmpty else { return }
-                            let hue = Double.random(in: 0...1)
-                            group.members = (group.members ?? []) + [Member(name: trimmed, colorHue: hue)]
+                            let member = Member(context: context, name: trimmed,
+                                                colorHue: Double.random(in: 0...1))
+                            member.group = group
                             try? context.save()
                             newName = ""
                         }

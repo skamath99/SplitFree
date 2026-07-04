@@ -1,9 +1,10 @@
 import SwiftUI
-import SwiftData
+import CoreData
 
 struct GroupsListView: View {
-    @Environment(\.modelContext) private var context
-    @Query(sort: \SpendingGroup.createdAt, order: .reverse) private var groups: [SpendingGroup]
+    @Environment(\.managedObjectContext) private var context
+    @FetchRequest(fetchRequest: SpendingGroup.fetchAll(), animation: .default)
+    private var groups: FetchedResults<SpendingGroup>
     @State private var showingNewGroup = false
 
     var body: some View {
@@ -53,7 +54,7 @@ struct GroupsListView: View {
 }
 
 private struct GroupRow: View {
-    let group: SpendingGroup
+    @ObservedObject var group: SpendingGroup
 
     var body: some View {
         HStack(spacing: 12) {
@@ -73,7 +74,7 @@ private struct GroupRow: View {
     }
 
     private var myBalance: Int {
-        guard let me = group.sortedMembers.first(where: { $0.isCurrentUser }) else { return 0 }
+        guard let me = group.sortedMembers.first(where: { $0.isMe }) else { return 0 }
         return group.balances[me.id] ?? 0
     }
 
@@ -86,7 +87,7 @@ private struct GroupRow: View {
 }
 
 struct GroupFormView: View {
-    @Environment(\.modelContext) private var context
+    @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var emoji = "✈️"
@@ -119,7 +120,7 @@ struct GroupFormView: View {
                 } header: {
                     Text("Members")
                 } footer: {
-                    Text("Members live on this device today. iCloud sharing via CloudKit is on the roadmap — no accounts, no servers.")
+                    Text("Invite friends from the group's Share button and everyone sees the same live ledger through iCloud — no accounts, no servers.")
                 }
             }
             .navigationTitle("New group")
@@ -137,16 +138,17 @@ struct GroupFormView: View {
     }
 
     private func create() {
-        let group = SpendingGroup(name: name.trimmingCharacters(in: .whitespaces),
+        let group = SpendingGroup(context: context, name: name.trimmingCharacters(in: .whitespaces),
                                   emoji: emoji, currencyCode: currencyCode)
-        context.insert(group)
-        var members: [Member] = [Member(name: "You", isCurrentUser: true, colorHue: 0.55)]
+        let you = Member(context: context, name: "You", isCurrentUser: true, colorHue: 0.55)
+        you.group = group
         let names = memberNames.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         for (index, memberName) in names.enumerated() {
             let hue = (0.55 + Double(index + 1) * 0.17).truncatingRemainder(dividingBy: 1)
-            members.append(Member(name: memberName, colorHue: hue))
+            let member = Member(context: context, name: memberName, colorHue: hue)
+            member.group = group
         }
-        group.members = members
+        CurrentUser.claim(you)
         try? context.save()
         dismiss()
     }

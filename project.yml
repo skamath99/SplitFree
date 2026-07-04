@@ -15,23 +15,26 @@ targets:
       - App
     dependencies:
       - package: SplitCore
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: SplitFree
+        UILaunchScreen: {}
+        UIBackgroundModes: [remote-notification]
+        CKSharingSupported: true
+        NSPhotoLibraryUsageDescription: "SplitFree reads receipt photos you choose so it can scan the items and total for you."
+        UISupportedInterfaceOrientations~iphone: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sank.splitfree
         DEVELOPMENT_TEAM: 547M5QUW76
         CODE_SIGN_ENTITLEMENTS: App/SplitFree.entitlements
-        INFOPLIST_KEY_UIBackgroundModes: remote-notification
         TARGETED_DEVICE_FAMILY: "1,2"
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
         SWIFT_VERSION: "5.10"
         CURRENT_PROJECT_VERSION: 1
-        MARKETING_VERSION: 0.1.0
-        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: "1.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        INFOPLIST_KEY_CFBundleDisplayName: SplitFree
-        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "SplitFree reads receipt photos you choose so it can scan the total for you."
     scheme:
       testTargets:
         - SplitFreeUITests

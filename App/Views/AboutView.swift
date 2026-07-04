@@ -14,6 +14,8 @@ struct AboutView: View {
                 }
 
                 Section("Everything Splitwise charges for, free") {
+                    FeatureRow(symbol: "person.crop.circle.badge.plus", title: "Shared groups",
+                               detail: "Invite friends from a group's Share button; everyone sees the same live ledger through iCloud.")
                     FeatureRow(symbol: "doc.text.viewfinder", title: "Receipt scanning",
                                detail: "On-device OCR reads the line items so each dish goes to whoever ordered it. Photos never leave your phone.")
                     FeatureRow(symbol: "dollarsign.arrow.circlepath", title: "Currency conversion",
@@ -34,7 +36,7 @@ struct AboutView: View {
                 }
 
                 Section("Your data") {
-                    Text("Your data syncs through your private iCloud database when you're signed into iCloud — Apple's free infrastructure, invisible to us and to third parties. Without iCloud it simply stays on-device. Shared groups that sync between friends are the next step on the roadmap.")
+                    Text("Your data lives in your iCloud database — Apple's free infrastructure, invisible to us and to third parties. Groups you share are visible only to the people you invite. Without iCloud everything simply stays on-device.")
                         .font(.callout)
                 }
             }

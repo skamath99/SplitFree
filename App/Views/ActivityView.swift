@@ -1,9 +1,10 @@
 import SwiftUI
-import SwiftData
+import CoreData
 
 /// Cross-group feed with full-text search — a Splitwise Pro feature, free here.
 struct ActivityView: View {
-    @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
+    @FetchRequest(fetchRequest: Expense.fetchAll(), animation: .default)
+    private var expenses: FetchedResults<Expense>
     @State private var searchText = ""
     @State private var category: ExpenseCategory?
 

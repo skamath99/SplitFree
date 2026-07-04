@@ -1,47 +1,39 @@
 import SwiftUI
-import SwiftData
+import CoreData
+import CloudKit
 
 @main
 struct SplitFreeApp: App {
-    let container: ModelContainer
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    private let persistence = PersistenceController.shared
 
     init() {
-        let schema = Schema([SpendingGroup.self, Member.self, Expense.self,
-                             ExpenseShare.self, LineItem.self, Settlement.self])
-        // Sync through the user's private iCloud database (free, serverless).
-        // Falls back to a device-local store when iCloud is unavailable —
-        // signed out, entitlement missing, or tests forcing determinism.
-        let forceLocal = CommandLine.arguments.contains("--local-store")
-        var made: ModelContainer?
-        if !forceLocal {
-            let cloudConfig = ModelConfiguration(schema: schema,
-                                                 cloudKitDatabase: .private("iCloud.com.sank.splitfree"))
-            made = try? ModelContainer(for: schema, configurations: [cloudConfig])
-        }
-        if let made {
-            container = made
-        } else {
-            // .none explicitly: the default (.automatic) would re-enable
-            // CloudKit because the entitlement is present.
-            let localConfig = ModelConfiguration(schema: schema, cloudKitDatabase: .none)
-            do {
-                container = try ModelContainer(for: schema, configurations: [localConfig])
-            } catch {
-                fatalError("Could not create ModelContainer: \(error)")
-            }
-        }
-        if CommandLine.arguments.contains("--reset-data") {
-            let context = ModelContext(container)
-            try? context.delete(model: SpendingGroup.self)
-            try? context.save()
-        }
-        RecurrenceService.materializeDueExpenses(context: ModelContext(container))
+        RecurrenceService.materializeDueExpenses(context: persistence.container.viewContext)
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(\.managedObjectContext, persistence.container.viewContext)
         }
-        .modelContainer(container)
+    }
+}
+
+// UIKit delegates exist only to catch CloudKit share acceptance — the hook
+// SwiftUI doesn't expose. Tapping an iCloud invite routes through here.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
+        configuration.delegateClass = SceneDelegate.self
+        return configuration
+    }
+}
+
+final class SceneDelegate: NSObject, UIWindowSceneDelegate {
+    func windowScene(_ windowScene: UIWindowScene,
+                     userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata) {
+        PersistenceController.shared.accept(cloudKitShareMetadata)
     }
 }
