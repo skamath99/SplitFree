@@ -5,3 +5,6 @@ DerivedData/
 xcuserdata/
 .swiftpm/
 .build/
+
+# Screenshots are added deliberately (a few for the site), not en masse
+screenshots/
