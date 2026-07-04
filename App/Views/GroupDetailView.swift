@@ -156,14 +156,45 @@ struct CloudSharingView: UIViewControllerRepresentable {
     let container: CKContainer
     let title: String
 
+    func makeCoordinator() -> Coordinator { Coordinator(title: title) }
+
     func makeUIViewController(context: Context) -> UICloudSharingController {
         share[CKShare.SystemFieldKey.title] = title as CKRecordValue
         let controller = UICloudSharingController(share: share, container: container)
-        controller.availablePermissions = [.allowReadWrite, .allowPrivate]
+        // allowPublic lets the owner pick "anyone with the link", so a friend
+        // can join without the invite matching their iCloud email or phone.
+        controller.availablePermissions = [.allowReadWrite, .allowPrivate, .allowPublic]
+        controller.delegate = context.coordinator
         return controller
     }
 
     func updateUIViewController(_ controller: UICloudSharingController, context: Context) {}
+
+    final class Coordinator: NSObject, UICloudSharingControllerDelegate {
+        let title: String
+        init(title: String) { self.title = title }
+
+        func itemTitle(for csc: UICloudSharingController) -> String? { title }
+
+        func cloudSharingControllerDidSaveShare(_ csc: UICloudSharingController) {
+            // Participant/permission edits happen server-side; without this the
+            // local mirror keeps the stale share record.
+            if let share = csc.share {
+                PersistenceController.shared.persistUpdatedShare(share)
+            }
+        }
+
+        func cloudSharingController(_ csc: UICloudSharingController,
+                                    failedToSaveShareWithError error: Error) {
+            print("Share save failed: \(error)")
+        }
+
+        func cloudSharingControllerDidStopSharing(_ csc: UICloudSharingController) {
+            if let share = csc.share {
+                PersistenceController.shared.persistUpdatedShare(share)
+            }
+        }
+    }
 }
 
 struct ExpenseRow: View {

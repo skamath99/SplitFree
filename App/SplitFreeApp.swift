@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreData
 import CloudKit
+import OSLog
 
 @main
 struct SplitFreeApp: App {
@@ -25,15 +26,37 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        Logger(subsystem: "com.sank.splitfree", category: "sharing")
+            .log("configurationForConnecting called")
         let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
         configuration.delegateClass = SceneDelegate.self
         return configuration
     }
+
+    func application(_ application: UIApplication,
+                     userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata) {
+        Logger(subsystem: "com.sank.splitfree", category: "sharing")
+            .log("AppDelegate userDidAcceptCloudKitShareWith")
+        PersistenceController.shared.accept(cloudKitShareMetadata)
+    }
 }
 
 final class SceneDelegate: NSObject, UIWindowSceneDelegate {
+    /// Invite tapped while the app wasn't running: the metadata arrives in the
+    /// connection options at launch, not via userDidAcceptCloudKitShareWith.
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession,
+               options connectionOptions: UIScene.ConnectionOptions) {
+        Logger(subsystem: "com.sank.splitfree", category: "sharing")
+            .log("SceneDelegate willConnectTo, metadata: \(connectionOptions.cloudKitShareMetadata != nil)")
+        if let metadata = connectionOptions.cloudKitShareMetadata {
+            PersistenceController.shared.accept(metadata)
+        }
+    }
+
     func windowScene(_ windowScene: UIWindowScene,
                      userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata) {
+        Logger(subsystem: "com.sank.splitfree", category: "sharing")
+            .log("SceneDelegate userDidAcceptCloudKitShareWith")
         PersistenceController.shared.accept(cloudKitShareMetadata)
     }
 }

@@ -108,7 +108,19 @@ final class PersistenceController {
         if let existing = existingShare(for: group) { return existing }
         let (_, share, _) = try await container.share([group], to: nil)
         share[CKShare.SystemFieldKey.title] = group.name as CKRecordValue
+        persistUpdatedShare(share)
         return share
+    }
+
+    /// Pushes share edits (title, participants, permissions) back into the
+    /// local mirror so Core Data doesn't overwrite them with a stale copy.
+    func persistUpdatedShare(_ share: CKShare) {
+        guard let privateStore else { return }
+        container.persistUpdatedShare(share, in: privateStore) { _, error in
+            if let error {
+                print("Persisting updated share failed: \(error)")
+            }
+        }
     }
 
     /// Whether this device's user owns the group (vs. it being shared to them).

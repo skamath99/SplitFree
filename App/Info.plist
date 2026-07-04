@@ -22,6 +22,8 @@
 	<string>1</string>
 	<key>CKSharingSupported</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>SplitFree reads receipt photos you choose so it can scan the items and total for you.</string>
 	<key>UIBackgroundModes</key>
