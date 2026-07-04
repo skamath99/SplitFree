@@ -28,20 +28,22 @@ payments), recorded settlements, recurring expenses.
 
 ## Architecture decisions
 
-**Why no in-app Apple Pay button.** Apple exposes no public API for sending
-person-to-person Apple Cash payments — PassKit is for paying *merchants* and
-requires a payment processor. So no app can move P2P money for free. SplitFree
-does the next-best serverless thing: **"Pay in Messages"** opens iMessage with
-the amount pre-filled (`sms:` URL), where Apple Cash is built into the keyboard,
-and you record the settlement in the app.
+**Why no in-app Apple Pay button.** Apple exposes no public API for sending —
+or confirming — person-to-person Apple Cash payments. PassKit is for paying
+*merchants* and requires a payment processor. Since SplitFree can't verify that
+money actually moved, it deliberately stays out of the payment itself: settle
+with whatever tool you like (a share button hands the request text to Messages,
+Venmo, mail, anything), and a payment only enters the ledger when you
+explicitly **mark it as paid**.
 
-**Why no database server.** Everything is SwiftData on-device. The models follow
-CloudKit's compatibility rules (no unique constraints, optional inverse
-relationships, defaults everywhere), so the upgrade path to **CloudKit** — Apple's
-free hosted storage, the "Game Center for data" — is a one-line
-`ModelConfiguration(cloudKitDatabase: .private(...))` plus the iCloud entitlement.
-Shared groups between users would use `CKShare` on the same infrastructure.
-Still no third-party servers, ever.
+**Why no database server.** Storage is SwiftData mirrored to **CloudKit** —
+Apple's free hosted storage, the "Game Center for data." Data syncs through the
+user's private iCloud database when they're signed in, and falls back to a
+device-local store otherwise (also forced in UI tests via `--local-store`). The
+models follow CloudKit's compatibility rules: no unique constraints, defaults
+everywhere, and an inverse on every relationship. Shared groups between users
+(`CKShare`) are the next step on the same infrastructure. No third-party
+servers, ever.
 
 **Money math.** All amounts are integer minor units (cents). Splits use
 largest-remainder allocation so every penny is accounted for deterministically.
@@ -72,7 +74,8 @@ same scheme.
 
 ## Roadmap
 
-- CloudKit sync + `CKShare` group sharing (models are ready)
+- `CKShare` shared groups so friends see the same live ledger (private-database
+  sync is already in)
 - Live exchange rates (optional network fetch, still no server)
 - Expense detail view with per-person breakdown
 - Widgets / App Intents ("Add expense" from the Home Screen)

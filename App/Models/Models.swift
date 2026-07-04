@@ -75,6 +75,18 @@ final class Member {
     var isCurrentUser: Bool = false
     var colorHue: Double = 0.55
     var group: SpendingGroup?
+    // CloudKit requires an inverse on every relationship; these exist for
+    // that rule and are rarely traversed directly.
+    @Relationship(inverse: \LineItem.participants)
+    var lineItems: [LineItem]? = []
+    @Relationship(inverse: \Expense.payer)
+    var paidExpenses: [Expense]? = []
+    @Relationship(inverse: \ExpenseShare.member)
+    var expenseShares: [ExpenseShare]? = []
+    @Relationship(inverse: \Settlement.from)
+    var settlementsSent: [Settlement]? = []
+    @Relationship(inverse: \Settlement.to)
+    var settlementsReceived: [Settlement]? = []
 
     init(name: String, isCurrentUser: Bool = false, colorHue: Double = 0.55) {
         self.name = name
@@ -198,8 +210,8 @@ final class LineItem {
     var id: UUID = UUID()
     var name: String = ""
     var amountMinorUnits: Int = 0
-    /// Members splitting this item equally. Many-to-many, no inverse needed
-    /// for CloudKit as long as it stays optional.
+    /// Members splitting this item equally. Many-to-many; CloudKit requires
+    /// the inverse (Member.lineItems).
     var participants: [Member]? = []
     var expense: Expense?
 

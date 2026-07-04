@@ -4,11 +4,12 @@ import SplitCore
 
 /// Settle-up: shows the minimal transfer plan and records payments.
 ///
-/// Why no in-app Apple Pay button: Apple exposes no public API for sending
-/// person-to-person Apple Cash payments (PassKit is for paying merchants and
-/// requires a payment processor). The free, serverless approach is to open
-/// Messages with the amount prefilled — iMessage surfaces its own Apple Cash
-/// suggestion — and record the settlement here.
+/// SplitFree never moves money and can't verify that a transfer happened:
+/// Apple exposes no public API for sending or confirming person-to-person
+/// Apple Cash payments (PassKit is for paying merchants and requires a
+/// payment processor). So the app stays neutral about how people pay —
+/// a share button hands the request to whatever tool they choose — and a
+/// payment is only recorded when the user explicitly marks it as paid.
 struct SettleUpView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -33,7 +34,7 @@ struct SettleUpView: View {
                     } header: {
                         Text("Suggested payments")
                     } footer: {
-                        Text("Debts are simplified to the fewest possible payments. Tapping the Messages button pre-fills the amount so Apple Cash is one tap away — then record it here.")
+                        Text("Debts are simplified to the fewest possible payments. Settle however you like — Apple Cash, Venmo, cash — then mark the payment as paid once the money has actually moved. SplitFree can't verify transfers for you.")
                     }
                 }
                 Section {
@@ -113,34 +114,27 @@ private struct TransferRow: View {
             }
             HStack {
                 if involvesMe {
-                    Button {
-                        openMessages()
-                    } label: {
-                        Label(fromMember?.isCurrentUser == true ? "Pay in Messages" : "Request in Messages",
-                              systemImage: "message.fill")
+                    ShareLink(item: shareText) {
+                        Label("Share request", systemImage: "square.and.arrow.up")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
-                Button("Record payment", systemImage: "checkmark.circle", action: onRecord)
-                    .buttonStyle(.borderedProminent)
+                Button("Mark as paid", systemImage: "checkmark.circle", action: onRecord)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
             }
         }
         .padding(.vertical, 4)
     }
 
-    private func openMessages() {
+    /// Tool-agnostic settle-up text for the share sheet — the user picks
+    /// Messages, Venmo, mail, or anything else themselves.
+    private var shareText: String {
         let paying = fromMember?.isCurrentUser == true
-        let other = paying ? toMember?.name : fromMember?.name
-        let body = paying
-            ? "Sending you \(amountText) for \(group.name) 💸 (Apple Cash)"
-            : "Hey\(other.map { " \($0)" } ?? "")! Requesting \(amountText) for \(group.name) 💸 (Apple Cash)"
-        var components = URLComponents(string: "sms:")
-        components?.queryItems = [URLQueryItem(name: "body", value: body)]
-        if let url = components?.url {
-            UIApplication.shared.open(url)
-        }
+        return paying
+            ? "Sending you \(amountText) to settle up for \(group.name)."
+            : "Settle-up request: \(amountText) for \(group.name)."
     }
 }
 
@@ -180,6 +174,10 @@ struct RecordPaymentView: View {
                     ForEach(SettlementMethod.allCases) { Text($0.displayName).tag($0) }
                 }
                 DatePicker("Date", selection: $date, displayedComponents: .date)
+                Section {
+                } footer: {
+                    Text("SplitFree can't confirm transfers automatically. Save this only once the money has actually moved.")
+                }
             }
             .navigationTitle("Record payment")
             .navigationBarTitleDisplayMode(.inline)

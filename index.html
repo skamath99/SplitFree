@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SplitFree — split group expenses, completely free</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    max-width: 900px; margin: 0 auto; padding: 2rem 1.25rem 4rem;
+    line-height: 1.6; color: #1f2328;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6edf3; background: #0d1117; }
+    a { color: #58a6ff; }
+    .screenshots img { border-color: #30363d; }
+    hr { border-color: #30363d; }
+  }
+  h1 { margin-bottom: 0.25rem; }
+  .tagline { font-size: 1.15rem; color: #656d76; margin-top: 0; }
+  hr { border: none; border-top: 1px solid #d0d7de; margin: 2.5rem 0; }
+  .screenshots { display: flex; gap: 12px; flex-wrap: wrap; margin: 1.5rem 0; }
+  .screenshots img {
+    width: 200px; max-width: 45%; border: 1px solid #d0d7de; border-radius: 12px;
+  }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #d0d7de88; }
+  .disclaimer { font-size: 0.9rem; color: #656d76; }
+</style>
+</head>
+<body>
+
+<h1>SplitFree</h1>
+<p class="tagline">Split group expenses on iOS — every feature free, no ads, no accounts, no servers.</p>
+
+<p class="disclaimer">All the code here was created by Claude Code. None of it was reviewed by a human.</p>
+
+<p>SplitFree tracks shared expenses for trips, housemates, and friend groups. It
+splits bills fairly, keeps running balances, and simplifies debts down to the
+fewest possible payments. Features that other expense-splitting apps put behind
+a subscription are simply free here.</p>
+
+<div class="screenshots">
+  <img src="screenshots/03-group-detail.png" alt="Group balances and expenses">
+  <img src="screenshots/04-add-expense.png" alt="Adding an expense with split options">
+  <img src="screenshots/05-settle-up.png" alt="Settle up with simplified payments">
+  <img src="screenshots/06-insights.png" alt="Spending charts and insights">
+</div>
+
+<h2>Features</h2>
+<ul>
+  <li><strong>Groups &amp; expenses</strong> — organize costs by trip, house, or crew; unlimited everything.</li>
+  <li><strong>Flexible splits</strong> — equal, exact amounts, percentages, or shares, with penny-exact math.</li>
+  <li><strong>Itemization</strong> — split by line item, with tax and tip spread proportionally to what each person ordered.</li>
+  <li><strong>Debt simplification</strong> — balances collapse to the fewest possible payments.</li>
+  <li><strong>Settle up, your way</strong> — share a request through any app you like (Apple Cash in Messages, Venmo, anything). A payment is only recorded when you explicitly mark it as paid — SplitFree never moves or verifies money itself.</li>
+  <li><strong>Receipt scanning</strong> — on-device OCR finds the total; the photo never leaves your phone.</li>
+  <li><strong>Currencies</strong> — 30 currencies with built-in offline conversion.</li>
+  <li><strong>Search &amp; charts</strong> — full-text search across all groups; monthly and category spending breakdowns.</li>
+  <li><strong>Recurring expenses</strong> — rent and subscriptions add themselves.</li>
+</ul>
+
+<hr>
+
+<h2>Privacy Policy</h2>
+<p><em>Last updated: July 4, 2026</em></p>
+
+<p><strong>SplitFree does not collect, transmit, or share any personal information.</strong></p>
+
+<ul>
+  <li><strong>All data stays on your device.</strong> Groups, members, expenses, and
+  settlements are stored locally using Apple's SwiftData. Nothing is sent to us
+  or to any third party — there is no server.</li>
+  <li><strong>No accounts.</strong> The app requires no sign-up, login, email
+  address, or phone number.</li>
+  <li><strong>No third-party services.</strong> No analytics, no advertising
+  SDKs, no crash reporters, no tracking of any kind.</li>
+  <li><strong>Receipt photos</strong> are processed entirely on-device with
+  Apple's Vision framework and are not stored or uploaded.</li>
+  <li><strong>Your control.</strong> Deleting a group, expense, or the app itself
+  permanently removes the associated data from your device.</li>
+  <li>If iCloud sync is added in a future version, data would sync only through
+  your personal iCloud account under Apple's privacy terms, never through our
+  servers — we would still have no access to it.</li>
+</ul>
+
+<h2>Support</h2>
+<p>Questions, issues, or feature requests? Please open an issue on the
+<a href="https://github.com/skamath99/SplitFree/issues">GitHub repository</a>.</p>
+
+<p class="disclaimer">© 2026 Sanketh Kamath</p>
+
+</body>
+</html>

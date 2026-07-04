@@ -29,12 +29,12 @@ struct AboutView: View {
                 }
 
                 Section("How payments work") {
-                    Text("Apple doesn't offer an API for apps to send person-to-person Apple Cash payments, so no app can move money for free without a payment processor. SplitFree does the next best thing: \"Pay in Messages\" opens iMessage with the amount pre-filled, where Apple Cash is built in — then you record the payment here.")
+                    Text("SplitFree never moves money. Apple doesn't offer an API for apps to send or confirm person-to-person payments, so settle up with whatever you already use — Apple Cash, Venmo, cash — and mark the payment as paid here once it has actually gone through. Nothing is recorded until you say so.")
                         .font(.callout)
                 }
 
                 Section("Your data") {
-                    Text("Everything lives on this device in a local database. The data model is CloudKit-ready: iCloud sync and shared groups (via CKShare, Apple's free infrastructure — the same family as Game Center) are the planned next step, still with no third-party servers.")
+                    Text("Your data syncs through your private iCloud database when you're signed into iCloud — Apple's free infrastructure, invisible to us and to third parties. Without iCloud it simply stays on-device. Shared groups that sync between friends are the next step on the roadmap.")
                         .font(.callout)
                 }
             }

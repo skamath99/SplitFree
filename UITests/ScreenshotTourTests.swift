@@ -12,9 +12,11 @@ final class ScreenshotTourTests: XCTestCase {
 
     func testTour() throws {
         let app = XCUIApplication()
+        app.launchArguments = ["--reset-data", "--local-store"]
         app.launch()
+        try app.createTahoeTripWithDinner()
 
-        // Groups list (populated by the flow test's data).
+        app.navigationBars.buttons.firstMatch.tap() // back to groups
         XCTAssertTrue(app.staticTexts["Tahoe Trip"].waitForExistence(timeout: 5))
         snap("02-groups")
 

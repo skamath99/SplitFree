@@ -6,45 +6,12 @@ final class SplitFreeFlowTests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
+        app.launchArguments = ["--reset-data", "--local-store"]
         app.launch()
     }
 
     func testCreateGroupAddExpenseAndSettleUp() throws {
-        // Create a group with two extra members.
-        if app.buttons["Create a group"].waitForExistence(timeout: 5) {
-            app.buttons["Create a group"].tap()
-        } else {
-            app.navigationBars.buttons["Add"].tap()
-        }
-        let nameField = app.textFields["Name (e.g. Tahoe Trip)"]
-        XCTAssertTrue(nameField.waitForExistence(timeout: 5))
-        nameField.tap()
-        nameField.typeText("Tahoe Trip")
-
-        let memberField = app.textFields["Member name"]
-        memberField.tap()
-        memberField.typeText("Alice")
-        app.buttons["Add another member"].tap()
-        let memberFields = app.textFields.matching(identifier: "Member name")
-        memberFields.element(boundBy: 1).tap()
-        memberFields.element(boundBy: 1).typeText("Bob")
-        app.buttons["Create"].tap()
-
-        // Open the group.
-        let groupCell = app.cells.staticTexts["Tahoe Trip"]
-        XCTAssertTrue(groupCell.waitForExistence(timeout: 5))
-        groupCell.tap()
-
-        // Add a $90 dinner paid by You, split equally 3 ways.
-        app.buttons["Add expense"].tap()
-        let titleField = app.textFields["Title (e.g. Dinner at Luigi's)"]
-        XCTAssertTrue(titleField.waitForExistence(timeout: 5))
-        titleField.tap()
-        titleField.typeText("Dinner")
-        let amountField = app.textFields["0.00"].firstMatch
-        amountField.tap()
-        amountField.typeText("90")
-        app.buttons["Save"].tap()
+        try app.createTahoeTripWithDinner()
 
         // Balances: You are owed 60, Alice and Bob owe 30 each.
         XCTAssertTrue(app.staticTexts["Dinner"].waitForExistence(timeout: 5))
@@ -54,7 +21,7 @@ final class SplitFreeFlowTests: XCTestCase {
         // Settle up: two suggested payments of $30 to You.
         app.buttons["Settle up"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Suggested payments"].waitForExistence(timeout: 5))
-        let recordButtons = app.buttons.matching(identifier: "Record payment")
+        let recordButtons = app.buttons.matching(identifier: "Mark as paid")
         XCTAssertEqual(recordButtons.count, 2)
         recordButtons.firstMatch.tap()
 
@@ -70,7 +37,9 @@ final class SplitFreeFlowTests: XCTestCase {
         XCTAssertEqual(app.staticTexts.matching(identifier: "$30.00").count, 2) // owes + is owed
 
         // Kill and relaunch: everything (including the settlement) must persist.
+        // Drop --reset-data so the relaunch doesn't wipe what we just made.
         app.terminate()
+        app.launchArguments = ["--local-store"]
         app.launch()
         app.cells.staticTexts["Tahoe Trip"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Dinner"].waitForExistence(timeout: 5))
