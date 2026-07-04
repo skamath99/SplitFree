@@ -154,3 +154,103 @@ final class MoneyTests: XCTestCase {
         XCTAssertNil(converter.convert(usd, to: "XXX"))
     }
 }
+
+final class ReceiptParserTests: XCTestCase {
+    /// Builds a receipt row the way Vision reports it: the name and the price
+    /// as separate observations sharing a vertical center.
+    private func row(_ name: String, _ price: String, y: Double) -> [ScannedLine] {
+        [ScannedLine(text: name, x: 0.05, y: y, height: 0.02),
+         ScannedLine(text: price, x: 0.80, y: y, height: 0.02)]
+    }
+
+    private var dinnerReceipt: [ScannedLine] {
+        var lines: [ScannedLine] = [
+            ScannedLine(text: "LUIGI'S TRATTORIA", x: 0.2, y: 0.05, height: 0.02),
+            ScannedLine(text: "Table 12 · 07/04/2026", x: 0.2, y: 0.08, height: 0.02),
+        ]
+        lines += row("2 Margherita Pizza", "24.00", y: 0.20)
+        lines += row("Caesar Salad", "9.50", y: 0.24)
+        lines += row("House Red (btl)", "28.00", y: 0.28)
+        lines += row("Subtotal", "61.50", y: 0.40)
+        lines += row("Sales Tax 8%", "4.92", y: 0.44)
+        lines += row("Tip", "12.30", y: 0.48)
+        lines += row("TOTAL", "78.72", y: 0.52)
+        lines += row("VISA ****1234", "78.72", y: 0.60)
+        return lines
+    }
+
+    func testParsesItemsAndFooter() {
+        let receipt = ReceiptParser.parse(lines: dinnerReceipt.shuffled())
+        XCTAssertEqual(receipt.items, [
+            ScannedItem(name: "2 Margherita Pizza", amount: 24),
+            ScannedItem(name: "Caesar Salad", amount: Decimal(string: "9.50")!),
+            ScannedItem(name: "House Red (btl)", amount: 28),
+        ])
+        XCTAssertEqual(receipt.subtotal, Decimal(string: "61.50"))
+        XCTAssertEqual(receipt.tax, Decimal(string: "4.92"))
+        XCTAssertEqual(receipt.tip, Decimal(string: "12.30"))
+        XCTAssertEqual(receipt.total, Decimal(string: "78.72"))
+        XCTAssertEqual(receipt.effectiveTotal, Decimal(string: "78.72"))
+    }
+
+    func testPaymentRowsAreIgnored() {
+        let receipt = ReceiptParser.parse(lines: dinnerReceipt)
+        XCTAssertFalse(receipt.items.contains { $0.name.localizedCaseInsensitiveContains("visa") })
+    }
+
+    func testSingleObservationRows() {
+        // Some OCR passes return the whole row as one string.
+        let lines = [
+            ScannedLine(text: "Latte 5.25", x: 0.1, y: 0.2, height: 0.02),
+            ScannedLine(text: "Croissant 4.00", x: 0.1, y: 0.25, height: 0.02),
+            ScannedLine(text: "Total 9.25", x: 0.1, y: 0.35, height: 0.02),
+        ]
+        let receipt = ReceiptParser.parse(lines: lines)
+        XCTAssertEqual(receipt.items, [
+            ScannedItem(name: "Latte", amount: Decimal(string: "5.25")!),
+            ScannedItem(name: "Croissant", amount: 4),
+        ])
+        XCTAssertEqual(receipt.total, Decimal(string: "9.25"))
+    }
+
+    func testEffectiveTotalRebuiltWhenNoTotalPrinted() {
+        var lines = row("Burger", "12.00", y: 0.2)
+        lines += row("Fries", "5.00", y: 0.25)
+        lines += row("Tax", "1.36", y: 0.35)
+        let receipt = ReceiptParser.parse(lines: lines)
+        XCTAssertNil(receipt.total)
+        XCTAssertEqual(receipt.effectiveTotal, Decimal(string: "18.36"))
+    }
+
+    func testGrandTotalWinsOverSmallerTotalRows() {
+        var lines = row("Pasta", "20.00", y: 0.2)
+        lines += row("Total before tip", "21.60", y: 0.3)
+        lines += row("Grand Total", "25.60", y: 0.35)
+        let receipt = ReceiptParser.parse(lines: lines)
+        XCTAssertEqual(receipt.total, Decimal(string: "25.60"))
+    }
+
+    func testNumbersOnlyRowsAreNotItems() {
+        let lines = [
+            ScannedLine(text: "07/04/2026 19:32", x: 0.1, y: 0.1, height: 0.02),
+            ScannedLine(text: "1 23.50", x: 0.1, y: 0.2, height: 0.02),
+        ] + row("Steak", "23.50", y: 0.3)
+        let receipt = ReceiptParser.parse(lines: lines)
+        XCTAssertEqual(receipt.items, [ScannedItem(name: "Steak", amount: Decimal(string: "23.50")!)])
+    }
+
+    func testEuropeanDecimalComma() {
+        let lines = row("Bier", "4,50", y: 0.2) + row("Summe Total", "4,50", y: 0.3)
+        let receipt = ReceiptParser.parse(lines: lines)
+        XCTAssertEqual(receipt.items.first?.amount, Decimal(string: "4.50"))
+        XCTAssertEqual(receipt.total, Decimal(string: "4.50"))
+    }
+
+    func testTotalsFallbackRanksTotalLinesFirst() {
+        let candidates = ReceiptParser.totals(from: [
+            "Latte 5.25", "Croissant 4.00", "Subtotal 9.25", "Total 10.05",
+        ])
+        XCTAssertEqual(candidates.first, Decimal(string: "10.05"))
+        XCTAssertTrue(candidates.contains(Decimal(string: "9.25")!))
+    }
+}

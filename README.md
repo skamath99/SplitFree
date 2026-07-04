@@ -19,7 +19,7 @@ payments), recorded settlements, recurring expenses.
 
 | Splitwise Pro feature | SplitFree implementation |
 |---|---|
-| Receipt scanning | On-device Vision OCR; photo never leaves the phone |
+| Receipt scanning | On-device Vision OCR reads the line items into the itemized-split editor; photo never leaves the phone |
 | Currency conversion | 30 currencies with bundled offline rates |
 | Itemization | Per-line-item splits; tax/tip spread proportionally |
 | Expense search | Full search across all groups (Activity tab) |

@@ -1,15 +1,25 @@
 import SwiftUI
 import PhotosUI
 import Vision
+import SplitCore
+
+enum ReceiptScanResult {
+    /// Line items to prefill the itemization editor, plus the bill total
+    /// (tax/tip = total − items, spread proportionally by the editor).
+    case itemized(items: [ScannedItem], total: Decimal)
+    case total(Decimal)
+}
 
 /// Receipt scanning — a Splitwise Pro feature, free here via on-device Vision
-/// OCR. Pick a receipt photo; we find the total (no cloud, no upload).
+/// OCR. Reads the line items off a receipt photo so each dish can be assigned
+/// to whoever ordered it (no cloud, no upload). Falls back to just the total.
 struct ReceiptScannerView: View {
     @Environment(\.dismiss) private var dismiss
-    let onTotalFound: (Decimal) -> Void
+    let onResult: (ReceiptScanResult) -> Void
 
     @State private var selectedItem: PhotosPickerItem?
     @State private var image: UIImage?
+    @State private var receipt: ScannedReceipt?
     @State private var candidates: [Decimal] = []
     @State private var isScanning = false
     @State private var errorMessage: String?
@@ -21,7 +31,7 @@ struct ReceiptScannerView: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                        .frame(maxHeight: 260)
+                        .frame(maxHeight: receipt?.items.isEmpty == false ? 120 : 260)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
 
@@ -33,35 +43,15 @@ struct ReceiptScannerView: View {
 
                 if isScanning {
                     ProgressView("Reading receipt…")
+                } else if let receipt, !receipt.items.isEmpty {
+                    itemsList(receipt)
                 } else if !candidates.isEmpty {
-                    List {
-                        Section("Tap the total") {
-                            ForEach(candidates, id: \.self) { candidate in
-                                Button {
-                                    onTotalFound(candidate)
-                                    dismiss()
-                                } label: {
-                                    HStack {
-                                        Text(candidate.formatted(.number.precision(.fractionLength(2))))
-                                            .font(.body.weight(.medium))
-                                        if candidate == candidates.first {
-                                            Text("likely total")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        Image(systemName: "arrow.down.left.circle")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
+                    totalsList
                 } else if let errorMessage {
                     Text(errorMessage).foregroundStyle(.secondary).padding()
                 } else if image == nil {
                     ContentUnavailableView("Scan a receipt", systemImage: "doc.text.viewfinder",
-                                           description: Text("Everything runs on-device with Apple's Vision framework. The photo never leaves your phone."))
+                                           description: Text("The line items are read off the photo so you can assign each one to whoever ordered it. Everything runs on-device with Apple's Vision framework — the photo never leaves your phone."))
                 }
                 Spacer(minLength: 0)
             }
@@ -79,10 +69,88 @@ struct ReceiptScannerView: View {
         }
     }
 
+    private func itemsList(_ receipt: ScannedReceipt) -> some View {
+        List {
+            Section {
+                ForEach(Array(receipt.items.enumerated()), id: \.offset) { _, item in
+                    HStack {
+                        Text(item.name)
+                        Spacer()
+                        Text(item.amount.formatted(.number.precision(.fractionLength(2))))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("\(receipt.items.count) items found")
+            } footer: {
+                Text(footerText(for: receipt))
+            }
+
+            Section {
+                Button {
+                    onResult(.itemized(items: receipt.items, total: receipt.effectiveTotal))
+                    dismiss()
+                } label: {
+                    Label("Use these items", systemImage: "list.bullet.indent")
+                        .font(.body.weight(.semibold))
+                }
+                Button {
+                    onResult(.total(receipt.effectiveTotal))
+                    dismiss()
+                } label: {
+                    Label("Just use the total (\(receipt.effectiveTotal.formatted(.number.precision(.fractionLength(2)))))",
+                          systemImage: "sum")
+                }
+            } footer: {
+                Text("You can fix names and prices in the item editor before assigning people.")
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private var totalsList: some View {
+        List {
+            Section {
+                ForEach(candidates, id: \.self) { candidate in
+                    Button {
+                        onResult(.total(candidate))
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Text(candidate.formatted(.number.precision(.fractionLength(2))))
+                                .font(.body.weight(.medium))
+                            if candidate == candidates.first {
+                                Text("likely total")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.down.left.circle")
+                        }
+                    }
+                }
+            } header: {
+                Text("Tap the total")
+            } footer: {
+                Text("No line items could be read off this photo, but these amounts were.")
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func footerText(for receipt: ScannedReceipt) -> String {
+        var parts: [String] = ["Items \(receipt.itemsSum.formatted(.number.precision(.fractionLength(2))))"]
+        if let tax = receipt.tax { parts.append("tax \(tax.formatted(.number.precision(.fractionLength(2))))") }
+        if let tip = receipt.tip { parts.append("tip \(tip.formatted(.number.precision(.fractionLength(2))))") }
+        parts.append("total \(receipt.effectiveTotal.formatted(.number.precision(.fractionLength(2))))")
+        return parts.joined(separator: " · ") + ". Tax and tip get split proportionally to what each person ordered."
+    }
+
     private func scan() async {
         guard let selectedItem else { return }
         isScanning = true
         errorMessage = nil
+        receipt = nil
         candidates = []
         defer { isScanning = false }
 
@@ -105,36 +173,25 @@ struct ReceiptScannerView: View {
             return
         }
 
-        let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-        candidates = ReceiptParser.totals(from: lines)
-        if candidates.isEmpty {
-            errorMessage = "No amounts found — try a clearer photo."
+        let observations = request.results ?? []
+        // Vision's normalized coordinates put the origin bottom-left; flip y
+        // so the parser reads rows top-to-bottom.
+        let lines: [ScannedLine] = observations.compactMap { observation in
+            guard let text = observation.topCandidates(1).first?.string else { return nil }
+            let box = observation.boundingBox
+            return ScannedLine(text: text,
+                               x: box.minX,
+                               y: 1 - box.midY,
+                               height: box.height)
         }
-    }
-}
-
-enum ReceiptParser {
-    /// Pulls money-looking values out of OCR lines, ranked with lines that
-    /// mention "total" first, then by amount descending.
-    static func totals(from lines: [String]) -> [Decimal] {
-        let regex = /(\d{1,6}[.,]\d{2})/
-        var totalLineAmounts: [Decimal] = []
-        var otherAmounts: [Decimal] = []
-        for line in lines {
-            let isTotalLine = line.localizedCaseInsensitiveContains("total")
-                && !line.localizedCaseInsensitiveContains("subtotal")
-            for match in line.matches(of: regex) {
-                let normalized = match.1.replacing(",", with: ".")
-                guard let value = Decimal(string: String(normalized)), value > 0 else { continue }
-                if isTotalLine {
-                    totalLineAmounts.append(value)
-                } else {
-                    otherAmounts.append(value)
-                }
+        let parsed = ReceiptParser.parse(lines: lines)
+        if !parsed.items.isEmpty {
+            receipt = parsed
+        } else {
+            candidates = ReceiptParser.totals(from: lines.map(\.text))
+            if candidates.isEmpty {
+                errorMessage = "No amounts found — try a clearer photo."
             }
         }
-        var seen = Set<Decimal>()
-        let ranked = totalLineAmounts.sorted(by: >) + otherAmounts.sorted(by: >)
-        return ranked.filter { seen.insert($0).inserted }
     }
 }

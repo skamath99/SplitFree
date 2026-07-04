@@ -15,7 +15,7 @@ struct AboutView: View {
 
                 Section("Everything Splitwise charges for, free") {
                     FeatureRow(symbol: "doc.text.viewfinder", title: "Receipt scanning",
-                               detail: "On-device Vision OCR finds the total. Photos never leave your phone.")
+                               detail: "On-device OCR reads the line items so each dish goes to whoever ordered it. Photos never leave your phone.")
                     FeatureRow(symbol: "dollarsign.arrow.circlepath", title: "Currency conversion",
                                detail: "Built-in rates across 30 currencies, applied automatically in balances.")
                     FeatureRow(symbol: "list.bullet.indent", title: "Itemization",

@@ -58,8 +58,21 @@ struct ExpenseFormView: View {
                 }
             }
             .sheet(isPresented: $showingReceiptScanner) {
-                ReceiptScannerView { scannedTotal in
-                    amount = scannedTotal
+                ReceiptScannerView { result in
+                    switch result {
+                    case .itemized(let items, let total):
+                        amount = total
+                        withAnimation {
+                            isItemized = true
+                            itemDrafts = items.map { item in
+                                LineItemDraft(name: item.name,
+                                              amount: item.amount,
+                                              participantIDs: Set(members.map(\.id)))
+                            }
+                        }
+                    case .total(let scannedTotal):
+                        amount = scannedTotal
+                    }
                     if title.isEmpty { title = "Receipt" }
                 }
             }
@@ -79,7 +92,7 @@ struct ExpenseFormView: View {
                 AmountField(title: "0.00", value: $amount)
                     .font(.title3.weight(.semibold))
             }
-            Button("Scan receipt for total", systemImage: "doc.text.viewfinder") {
+            Button("Scan receipt", systemImage: "doc.text.viewfinder") {
                 showingReceiptScanner = true
             }
             DatePicker("Date", selection: $date, displayedComponents: .date)
