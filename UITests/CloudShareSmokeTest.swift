@@ -9,6 +9,7 @@ final class CloudShareSmokeTest: XCTestCase {
         app.launch()
 
         app.cells.staticTexts["Tahoe Trip"].firstMatch.tap()
+        app.claimFirstMemberIfAsked()
         let shareButton = app.navigationBars.buttons["Share group"]
         XCTAssertTrue(shareButton.waitForExistence(timeout: 5))
         shareButton.tap()
@@ -30,6 +31,7 @@ final class CloudShareSmokeTest: XCTestCase {
         app.launch()
 
         app.cells.staticTexts["Tahoe Trip"].firstMatch.tap()
+        app.claimFirstMemberIfAsked()
         app.navigationBars.buttons["More"].firstMatch.tap()
         let copyButton = app.buttons["Copy invite link"]
         XCTAssertTrue(copyButton.waitForExistence(timeout: 5))

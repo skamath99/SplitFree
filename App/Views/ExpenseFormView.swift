@@ -292,7 +292,9 @@ struct ExpenseFormView: View {
     private func populate() {
         currencyCode = group.currencyCode
         participantIDs = Set(members.map(\.id))
-        payerID = members.first(where: { $0.isCurrentUser })?.id ?? members.first?.id
+        payerID = members.first(where: { $0.isMe })?.id
+            ?? members.first(where: { $0.isCurrentUser })?.id
+            ?? members.first?.id
 
         guard let existing else { return }
         title = existing.title

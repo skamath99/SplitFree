@@ -106,20 +106,68 @@ final class PersistenceController {
     /// Creates (or returns) the share for a group so it can be handed to
     /// UICloudSharingController.
     func share(group: SpendingGroup) async throws -> CKShare {
-        if let existing = existingShare(for: group) { return existing }
+        let log = Logger(subsystem: "com.sank.splitfree", category: "sharing")
         do {
-            let (_, share, _) = try await container.share([group], to: nil)
-            share[CKShare.SystemFieldKey.title] = group.name as CKRecordValue
-            // Link-joinable from the start: friends tap the URL and are in,
-            // no iCloud-email-matched invite needed. The owner can restrict
-            // this later via Manage sharing.
-            share.publicPermission = .readWrite
-            persistUpdatedShare(share)
-            return share
+            let share: CKShare
+            if let existing = existingShare(for: group) {
+                share = existing
+            } else {
+                (_, share, _) = try await container.share([group], to: nil)
+            }
+            return try await publish(share, title: group.name)
         } catch {
-            Logger(subsystem: "com.sank.splitfree", category: "sharing")
-                .error("Creating share failed: \(error, privacy: .public)")
+            log.error("Creating share failed: \(error, privacy: .public)")
             throw error
+        }
+    }
+
+    /// Guarantees the share is live on the server, has its URL, and is
+    /// link-joinable (anyone with the link, read-write — the owner can
+    /// restrict it later via Manage sharing). Repairs shares that a previous
+    /// build left half-created locally: the local mirror's copy can be stale
+    /// or never exported, so the server's copy is fetched and saved directly
+    /// rather than trusting the async mirroring export.
+    private func publish(_ share: CKShare, title: String) async throws -> CKShare {
+        if share.url != nil && share.publicPermission != .none { return share }
+
+        let log = Logger(subsystem: "com.sank.splitfree", category: "sharing")
+        let database = CKContainer(identifier: Self.cloudKitContainerID).privateCloudDatabase
+
+        var record: CKShare
+        do {
+            record = try await database.record(for: share.recordID) as? CKShare ?? share
+            log.log("publish: fetched server copy, url: \(record.url?.absoluteString ?? "nil", privacy: .public)")
+        } catch {
+            log.log("publish: no server copy (\(error, privacy: .public)); saving local one")
+            record = share
+        }
+        record[CKShare.SystemFieldKey.title] = title as CKRecordValue
+        record.publicPermission = .readWrite
+
+        do {
+            return try await save(record, to: database)
+        } catch let error as CKError where error.code == .zoneNotFound {
+            // The share's zone never made it to the server either.
+            log.log("publish: creating missing zone")
+            _ = try await database.modifyRecordZones(saving: [CKRecordZone(zoneID: share.recordID.zoneID)],
+                                                     deleting: [])
+            return try await save(record, to: database)
+        }
+    }
+
+    private func save(_ record: CKShare, to database: CKDatabase) async throws -> CKShare {
+        do {
+            let saved = try await database.save(record) as? CKShare ?? record
+            persistUpdatedShare(saved)
+            return saved
+        } catch let error as CKError where error.code == .serverRecordChanged {
+            // Another device raced us; apply our fields to the server's copy.
+            guard let server = error.serverRecord as? CKShare else { throw error }
+            server[CKShare.SystemFieldKey.title] = record[CKShare.SystemFieldKey.title]
+            server.publicPermission = record.publicPermission
+            let saved = try await database.save(server) as? CKShare ?? server
+            persistUpdatedShare(saved)
+            return saved
         }
     }
 

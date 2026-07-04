@@ -13,6 +13,7 @@ struct GroupDetailView: View {
     @State private var expenseToEdit: Expense?
     @State private var sharePreparationFailed = false
     @State private var inviteLinkCopied = false
+    @State private var needsClaim = false
 
     var body: some View {
         List {
@@ -96,6 +97,12 @@ struct GroupDetailView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Send it to your friends — anyone with the link can join this group.")
+        }
+        .onAppear {
+            needsClaim = !CurrentUser.hasClaim(in: group)
+        }
+        .fullScreenCover(isPresented: $needsClaim) {
+            ClaimMemberView(group: group) { needsClaim = false }
         }
     }
 
@@ -291,11 +298,74 @@ struct ExpenseRow: View {
     }
 }
 
+/// Blocks a group until the person says who they are: joined-from-invite
+/// users must claim an existing member or add themselves before they can
+/// see or touch the ledger.
+struct ClaimMemberView: View {
+    @Environment(\.managedObjectContext) private var context
+    @ObservedObject var group: SpendingGroup
+    let onClaimed: () -> Void
+    @State private var newName = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if !group.sortedMembers.isEmpty {
+                    Section {
+                        ForEach(group.sortedMembers) { member in
+                            Button {
+                                CurrentUser.claim(member)
+                                onClaimed()
+                            } label: {
+                                HStack {
+                                    MemberAvatar(member: member, size: 30)
+                                    Text(member.name)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } header: {
+                        Text("Pick your name")
+                    } footer: {
+                        Text("If someone already added you, choose that name so existing expenses stay yours.")
+                    }
+                }
+                Section("Not in the list?") {
+                    HStack {
+                        TextField("Your name", text: $newName)
+                        Button("Join") {
+                            let trimmed = newName.trimmingCharacters(in: .whitespaces)
+                            guard !trimmed.isEmpty else { return }
+                            let member = Member(context: context, name: trimmed,
+                                                colorHue: Double.random(in: 0...1))
+                            member.group = group
+                            try? context.save()
+                            CurrentUser.claim(member)
+                            onClaimed()
+                        }
+                        .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+            .navigationTitle("Who are you?")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .interactiveDismissDisabled()
+    }
+}
+
 struct MembersView: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var group: SpendingGroup
     @State private var newName = ""
+    @State private var memberToRename: Member?
+    @State private var renameText = ""
+    @State private var claimRefresh = 0
 
     var body: some View {
         NavigationStack {
@@ -305,6 +375,11 @@ struct MembersView: View {
                         HStack {
                             MemberAvatar(member: member, size: 30)
                             Text(member.displayName)
+                            if member.isMe {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.tint)
+                            }
                             Spacer()
                             BalancePill(minorUnits: group.balances[member.id] ?? 0,
                                         currencyCode: group.currencyCode)
@@ -312,13 +387,16 @@ struct MembersView: View {
                         .contextMenu {
                             Button("This is me", systemImage: "person.crop.circle.badge.checkmark") {
                                 CurrentUser.claim(member)
+                                claimRefresh += 1
+                            }
+                            Button("Rename", systemImage: "pencil") {
+                                renameText = member.name
+                                memberToRename = member
                             }
                         }
                     }
                 } footer: {
-                    if !CurrentUser.hasClaim(in: group) {
-                        Text("Joined this group from an invite? Touch and hold your name and choose \"This is me\".")
-                    }
+                    Text("The checkmark shows which member is you on this device. Touch and hold a member to rename them.")
                 }
                 Section {
                     HStack {
@@ -338,12 +416,27 @@ struct MembersView: View {
                     Text("Members with recorded expenses can't be removed, to keep history intact.")
                 }
             }
+            .id(claimRefresh)
             .navigationTitle("Members")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .alert("Rename member", isPresented: Binding(
+                get: { memberToRename != nil },
+                set: { if !$0 { memberToRename = nil } })) {
+                TextField("Name", text: $renameText)
+                Button("Save") {
+                    let trimmed = renameText.trimmingCharacters(in: .whitespaces)
+                    if let member = memberToRename, !trimmed.isEmpty {
+                        member.name = trimmed
+                        try? context.save()
+                    }
+                    memberToRename = nil
+                }
+                Button("Cancel", role: .cancel) { memberToRename = nil }
             }
         }
     }

@@ -66,20 +66,21 @@ private struct GroupRow: View {
                 Text(group.name).font(.headline)
                 Text(summaryLine)
                     .font(.subheadline)
-                    .foregroundStyle(myBalance == 0 ? .secondary : myBalance > 0 ? Color.green : Color.orange)
+                    .foregroundStyle((myBalance ?? 0) == 0 ? .secondary : myBalance! > 0 ? Color.green : Color.orange)
             }
             Spacer()
         }
         .padding(.vertical, 2)
     }
 
-    private var myBalance: Int {
-        guard let me = group.sortedMembers.first(where: { $0.isMe }) else { return 0 }
+    private var myBalance: Int? {
+        guard let me = group.sortedMembers.first(where: { $0.isMe }) else { return nil }
         return group.balances[me.id] ?? 0
     }
 
     private var summaryLine: String {
         if (group.expenses ?? []).isEmpty { return "No expenses yet" }
+        guard let myBalance else { return "Tap to pick your name" }
         if myBalance == 0 { return "You're settled up" }
         let amount = abs(myBalance).asMoney(group.currencyCode)
         return myBalance > 0 ? "You are owed \(amount)" : "You owe \(amount)"
@@ -90,6 +91,7 @@ struct GroupFormView: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
+    @State private var yourName = ""
     @State private var emoji = "✈️"
     @State private var currencyCode = "USD"
     @State private var memberNames: [String] = [""]
@@ -110,7 +112,7 @@ struct GroupFormView: View {
                     }
                 }
                 Section {
-                    LabeledContent("You", value: "included automatically")
+                    TextField("Your name", text: $yourName)
                     ForEach(memberNames.indices, id: \.self) { index in
                         TextField("Member name", text: $memberNames[index])
                     }
@@ -120,7 +122,7 @@ struct GroupFormView: View {
                 } header: {
                     Text("Members")
                 } footer: {
-                    Text("Invite friends from the group's Share button and everyone sees the same live ledger through iCloud — no accounts, no servers.")
+                    Text("Use real names — friends you invite see them too. Invite friends from the group's Share button and everyone sees the same live ledger through iCloud — no accounts, no servers.")
                 }
             }
             .navigationTitle("New group")
@@ -131,7 +133,8 @@ struct GroupFormView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") { create() }
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty ||
+                                  yourName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
@@ -140,7 +143,8 @@ struct GroupFormView: View {
     private func create() {
         let group = SpendingGroup(context: context, name: name.trimmingCharacters(in: .whitespaces),
                                   emoji: emoji, currencyCode: currencyCode)
-        let you = Member(context: context, name: "You", isCurrentUser: true, colorHue: 0.55)
+        let you = Member(context: context, name: yourName.trimmingCharacters(in: .whitespaces),
+                         isCurrentUser: true, colorHue: 0.55)
         you.group = group
         let names = memberNames.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         for (index, memberName) in names.enumerated() {

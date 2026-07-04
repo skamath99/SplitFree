@@ -1,8 +1,16 @@
 import XCTest
 
 extension XCUIApplication {
-    /// Creates the "Tahoe Trip" group (You, Alice, Bob), opens it, and adds a
-    /// $90 Dinner paid by You split equally. Assumes a fresh --reset-data run.
+    /// Shared/legacy groups block on the "Who are you?" gate; claim the
+    /// first listed member so the test can proceed.
+    func claimFirstMemberIfAsked() {
+        if navigationBars["Who are you?"].waitForExistence(timeout: 3) {
+            cells.firstMatch.tap()
+        }
+    }
+
+    /// Creates the "Tahoe Trip" group (Sam, Alice, Bob), opens it, and adds a
+    /// $90 Dinner paid by Sam split equally. Assumes a fresh --reset-data run.
     func createTahoeTripWithDinner() throws {
         let createButton = buttons["Create a group"]
         XCTAssertTrue(createButton.waitForExistence(timeout: 5))
@@ -12,6 +20,10 @@ extension XCUIApplication {
         XCTAssertTrue(nameField.waitForExistence(timeout: 5))
         nameField.tap()
         nameField.typeText("Tahoe Trip")
+
+        let yourNameField = textFields["Your name"]
+        yourNameField.tap()
+        yourNameField.typeText("Sam")
 
         let memberField = textFields["Member name"]
         memberField.tap()

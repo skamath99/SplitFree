@@ -112,7 +112,9 @@ final class Member: NSManagedObject, Identifiable {
     /// Whether this member is the person holding the device.
     var isMe: Bool { CurrentUser.isMe(self) }
 
-    var displayName: String { isMe ? "You" : name }
+    /// Always the real name: in a shared group, a "You" label would be
+    /// somebody else on every other participant's device.
+    var displayName: String { name }
     var initials: String {
         let parts = name.split(separator: " ").prefix(2)
         return parts.map { String($0.prefix(1)).uppercased() }.joined()
