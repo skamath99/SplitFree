@@ -2,6 +2,7 @@ import SwiftUI
 import CoreData
 import CloudKit
 import SplitCore
+import OSLog
 
 struct GroupDetailView: View {
     @Environment(\.managedObjectContext) private var context
@@ -10,13 +11,8 @@ struct GroupDetailView: View {
     @State private var showingSettleUp = false
     @State private var showingMembers = false
     @State private var expenseToEdit: Expense?
-    @State private var shareToPresent: PreparedShare?
     @State private var sharePreparationFailed = false
-
-    struct PreparedShare: Identifiable {
-        let id = UUID()
-        let share: CKShare
-    }
+    @State private var inviteLinkCopied = false
 
     var body: some View {
         List {
@@ -26,11 +22,27 @@ struct GroupDetailView: View {
         .navigationTitle("\(group.emoji) \(group.name)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if PersistenceController.shared.isCloudBacked {
+                ToolbarItem(placement: .primaryAction) {
+                    // The system share sheet with a collaboration item is
+                    // the invite path that actually works from SwiftUI;
+                    // UICloudSharingController only manages existing shares.
+                    ShareLink(item: GroupShareItem(group: group),
+                              preview: SharePreview(group.name)) {
+                        Label("Share group", systemImage: "person.crop.circle.badge.plus")
+                    }
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     if PersistenceController.shared.isCloudBacked {
-                        Button("Share group", systemImage: "person.crop.circle.badge.plus") {
-                            prepareShare()
+                        Button("Copy invite link", systemImage: "link") {
+                            copyInviteLink()
+                        }
+                        if PersistenceController.shared.existingShare(for: group) != nil {
+                            Button("Manage sharing", systemImage: "person.2.badge.gearshape") {
+                                manageSharing()
+                            }
                         }
                     }
                     Button("Members", systemImage: "person.2") { showingMembers = true }
@@ -75,23 +87,44 @@ struct GroupDetailView: View {
         .sheet(isPresented: $showingMembers) {
             MembersView(group: group)
         }
-        .sheet(item: $shareToPresent) { prepared in
-            CloudSharingView(share: prepared.share,
-                             container: CKContainer(identifier: PersistenceController.cloudKitContainerID),
-                             title: group.name)
-                .ignoresSafeArea()
-        }
         .alert("Couldn't prepare the share", isPresented: $sharePreparationFailed) {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Check that you're signed into iCloud and try again.")
         }
+        .alert("Invite link copied", isPresented: $inviteLinkCopied) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Send it to your friends — anyone with the link can join this group.")
+        }
     }
 
-    private func prepareShare() {
+    /// Puts the group's share URL on the pasteboard, creating the share the
+    /// first time. Works even where the system share sheet misbehaves.
+    private func copyInviteLink() {
         Task {
             do {
-                shareToPresent = PreparedShare(share: try await PersistenceController.shared.share(group: group))
+                let share = try await PersistenceController.shared.share(group: group)
+                guard let url = share.url else {
+                    sharePreparationFailed = true
+                    return
+                }
+                UIPasteboard.general.url = url
+                inviteLinkCopied = true
+            } catch {
+                sharePreparationFailed = true
+            }
+        }
+    }
+
+    /// Participant list, permissions, stop sharing — the management UI.
+    /// Presented from UIKit directly: UICloudSharingController's actions
+    /// misfire when it's wrapped in a SwiftUI sheet.
+    private func manageSharing() {
+        Task {
+            do {
+                let share = try await PersistenceController.shared.share(group: group)
+                CloudSharePresenter.presentManagement(for: share, title: group.name)
             } catch {
                 sharePreparationFailed = true
             }
@@ -149,28 +182,58 @@ struct GroupDetailView: View {
     }
 }
 
-/// The system iCloud sharing sheet: invite people, manage participants,
-/// stop sharing. Everyone invited sees the same live group.
-struct CloudSharingView: UIViewControllerRepresentable {
-    let share: CKShare
-    let container: CKContainer
-    let title: String
+/// Collaboration item for the system share sheet: hands ShareLink the group's
+/// CKShare (creating it on demand), so Messages/Mail/Copy Link send a real
+/// CloudKit invite. Everyone who joins sees the same live group.
+struct GroupShareItem: Transferable {
+    let group: SpendingGroup
 
-    func makeCoordinator() -> Coordinator { Coordinator(title: title) }
+    static var transferRepresentation: some TransferRepresentation {
+        CKShareTransferRepresentation { item in
+            let log = Logger(subsystem: "com.sank.splitfree", category: "sharing")
+            let container = CKContainer(identifier: PersistenceController.cloudKitContainerID)
+            if let share = PersistenceController.shared.existingShare(for: item.group) {
+                log.log("exporter: existing share, url: \(share.url?.absoluteString ?? "nil", privacy: .public)")
+                return .existing(share, container: container)
+            }
+            log.log("exporter: prepareShare branch")
+            let options = CKAllowedSharingOptions(allowedParticipantPermissionOptions: .any,
+                                                  allowedParticipantAccessOptions: .any)
+            return .prepareShare(container: container, allowedSharingOptions: options) {
+                log.log("preparationHandler: creating share")
+                let share = try await PersistenceController.shared.share(group: item.group)
+                log.log("preparationHandler: created, url: \(share.url?.absoluteString ?? "nil", privacy: .public)")
+                return share
+            }
+        }
+    }
+}
 
-    func makeUIViewController(context: Context) -> UICloudSharingController {
-        share[CKShare.SystemFieldKey.title] = title as CKRecordValue
+/// Participant list, permissions, stop sharing. Presented directly from the
+/// top UIKit view controller: UICloudSharingController's buttons silently
+/// fail when the controller lives inside a SwiftUI sheet.
+@MainActor
+enum CloudSharePresenter {
+    private static var delegate: Delegate?
+
+    static func presentManagement(for share: CKShare, title: String) {
+        let container = CKContainer(identifier: PersistenceController.cloudKitContainerID)
         let controller = UICloudSharingController(share: share, container: container)
-        // allowPublic lets the owner pick "anyone with the link", so a friend
-        // can join without the invite matching their iCloud email or phone.
         controller.availablePermissions = [.allowReadWrite, .allowPrivate, .allowPublic]
-        controller.delegate = context.coordinator
-        return controller
+        let holder = Delegate(title: title)
+        delegate = holder // the controller only holds a weak reference
+        controller.delegate = holder
+
+        guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive }),
+              let root = scene.keyWindow?.rootViewController else { return }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        top.present(controller, animated: true)
     }
 
-    func updateUIViewController(_ controller: UICloudSharingController, context: Context) {}
-
-    final class Coordinator: NSObject, UICloudSharingControllerDelegate {
+    final class Delegate: NSObject, UICloudSharingControllerDelegate {
         let title: String
         init(title: String) { self.title = title }
 

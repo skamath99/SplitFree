@@ -1,5 +1,6 @@
 import CoreData
 import CloudKit
+import OSLog
 
 /// NSPersistentCloudKitContainer with two stores: the user's own groups live
 /// in the private CloudKit database; groups that friends shared with them
@@ -106,10 +107,20 @@ final class PersistenceController {
     /// UICloudSharingController.
     func share(group: SpendingGroup) async throws -> CKShare {
         if let existing = existingShare(for: group) { return existing }
-        let (_, share, _) = try await container.share([group], to: nil)
-        share[CKShare.SystemFieldKey.title] = group.name as CKRecordValue
-        persistUpdatedShare(share)
-        return share
+        do {
+            let (_, share, _) = try await container.share([group], to: nil)
+            share[CKShare.SystemFieldKey.title] = group.name as CKRecordValue
+            // Link-joinable from the start: friends tap the URL and are in,
+            // no iCloud-email-matched invite needed. The owner can restrict
+            // this later via Manage sharing.
+            share.publicPermission = .readWrite
+            persistUpdatedShare(share)
+            return share
+        } catch {
+            Logger(subsystem: "com.sank.splitfree", category: "sharing")
+                .error("Creating share failed: \(error, privacy: .public)")
+            throw error
+        }
     }
 
     /// Pushes share edits (title, participants, permissions) back into the

@@ -4,19 +4,18 @@ import XCTest
 /// it needs the simulator signed into iCloud; it creates the group share and
 /// checks the system share sheet appears, without inviting anyone.
 final class CloudShareSmokeTest: XCTestCase {
-    func testShareGroupPresentsCloudSharingSheet() throws {
+    func testShareGroupPresentsShareSheet() throws {
         let app = XCUIApplication()
         app.launch()
 
         app.cells.staticTexts["Tahoe Trip"].firstMatch.tap()
-        app.navigationBars.buttons["More"].firstMatch.tap()
-        let shareButton = app.buttons["Share group"]
+        let shareButton = app.navigationBars.buttons["Share group"]
         XCTAssertTrue(shareButton.waitForExistence(timeout: 5))
         shareButton.tap()
 
-        // UICloudSharingController is system UI; give CloudKit time to
-        // create the share, then look for its collaboration sheet.
-        let sheetAppeared = app.staticTexts["Tahoe Trip"].firstMatch.waitForExistence(timeout: 20)
+        // The system collaboration share sheet shows the group name as the
+        // preview title once the CKShare is ready.
+        let sheetAppeared = app.otherElements[" Collaboration"].firstMatch.waitForExistence(timeout: 20)
         XCTAssertTrue(sheetAppeared)
         sleep(3)
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -24,5 +23,20 @@ final class CloudShareSmokeTest: XCTestCase {
         add(attachment)
         try? XCUIScreen.main.screenshot().pngRepresentation.write(
             to: URL(fileURLWithPath: "/Users/sank/Documents/Projects/SplitFree/screenshots/share-sheet.png"))
+    }
+
+    func testCopyInviteLinkConfirms() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        app.cells.staticTexts["Tahoe Trip"].firstMatch.tap()
+        app.navigationBars.buttons["More"].firstMatch.tap()
+        let copyButton = app.buttons["Copy invite link"]
+        XCTAssertTrue(copyButton.waitForExistence(timeout: 5))
+        copyButton.tap()
+
+        let alert = app.alerts["Invite link copied"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 30))
+        alert.buttons["OK"].tap()
     }
 }
