@@ -22,6 +22,7 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes: [remote-notification]
         CKSharingSupported: true
+        ITSAppUsesNonExemptEncryption: false
         NSPhotoLibraryUsageDescription: "SplitFree reads receipt photos you choose so it can scan the items and total for you."
         UISupportedInterfaceOrientations~iphone: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
