@@ -1,6 +1,7 @@
 import CoreData
 import CloudKit
 import OSLog
+import UIKit
 
 /// NSPersistentCloudKitContainer with two stores: the user's own groups live
 /// in the private CloudKit database; groups that friends shared with them
@@ -192,8 +193,28 @@ final class PersistenceController {
         guard let sharedStore else { return }
         container.acceptShareInvitations(from: [metadata], into: sharedStore) { _, error in
             if let error {
+                // A silent failure here strands the recipient on an empty app
+                // with no idea the invite didn't take — surface it.
                 print("Share acceptance failed: \(error)")
+                Task { @MainActor in Self.presentShareError(error) }
             }
         }
+    }
+
+    /// Alerts from the top presented view controller — the same top-VC walk
+    /// CloudSharePresenter uses, since acceptance runs outside any SwiftUI view.
+    @MainActor
+    private static func presentShareError(_ error: Error) {
+        let alert = UIAlertController(title: "Couldn't open the shared group",
+                                     message: error.localizedDescription,
+                                     preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive }),
+              let root = scene.keyWindow?.rootViewController else { return }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        top.present(alert, animated: true)
     }
 }

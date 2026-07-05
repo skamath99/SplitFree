@@ -200,17 +200,19 @@ struct GroupShareItem: Transferable {
         CKShareTransferRepresentation { item in
             let log = Logger(subsystem: "com.sank.splitfree", category: "sharing")
             let container = CKContainer(identifier: PersistenceController.cloudKitContainerID)
-            if let share = PersistenceController.shared.existingShare(for: item.group) {
-                log.log("exporter: existing share, url: \(share.url?.absoluteString ?? "nil", privacy: .public)")
-                return .existing(share, container: container)
-            }
+            // Always go through prepareShare, even when a share already exists:
+            // an existing share can be half-published (no URL, publicPermission
+            // .none) — the exact state that gives link recipients "no permission
+            // to open". share(group:) returns the existing share AND re-runs
+            // publish(), which repairs it. The old .existing fast path skipped
+            // that and shipped the broken share as-is.
             log.log("exporter: prepareShare branch")
             let options = CKAllowedSharingOptions(allowedParticipantPermissionOptions: .any,
                                                   allowedParticipantAccessOptions: .any)
             return .prepareShare(container: container, allowedSharingOptions: options) {
-                log.log("preparationHandler: creating share")
+                log.log("preparationHandler: publishing share")
                 let share = try await PersistenceController.shared.share(group: item.group)
-                log.log("preparationHandler: created, url: \(share.url?.absoluteString ?? "nil", privacy: .public)")
+                log.log("preparationHandler: published, url: \(share.url?.absoluteString ?? "nil", privacy: .public)")
                 return share
             }
         }
