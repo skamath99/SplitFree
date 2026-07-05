@@ -7,13 +7,15 @@ import SplitCore
 /// SplitFree never moves money and can't verify that a transfer happened:
 /// Apple exposes no public API for sending or confirming person-to-person
 /// Apple Cash payments (PassKit is for paying merchants and requires a
-/// payment processor). So the app stays neutral about how people pay, and a
-/// payment is only recorded when the user explicitly marks it as paid.
+/// payment processor). So the app stays neutral about how people pay. Tapping
+/// a transfer's bubble opens the record sheet prefilled with that transfer so
+/// the date and method can be set — nothing is recorded until the user saves.
 struct SettleUpView: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var group: SpendingGroup
     @StateObject private var ledger = LedgerRefresher()
+    @State private var recordingTransfer: Transfer?
     @State private var showingManualPayment = false
 
     var body: some View {
@@ -27,7 +29,7 @@ struct SettleUpView: View {
                     Section {
                         ForEach(Array(group.suggestedTransfers.enumerated()), id: \.offset) { _, transfer in
                             TransferRow(group: group, transfer: transfer) {
-                                record(transfer)
+                                recordingTransfer = transfer
                             }
                         }
                     } header: {
@@ -69,29 +71,17 @@ struct SettleUpView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .sheet(item: $recordingTransfer) { transfer in
+                RecordPaymentView(group: group,
+                                  fromID: transfer.from,
+                                  toID: transfer.to,
+                                  amount: Money(minorUnits: transfer.minorUnits,
+                                                currencyCode: group.currencyCode).decimalValue)
+            }
             .sheet(isPresented: $showingManualPayment) {
                 RecordPaymentView(group: group)
             }
         }
-    }
-
-    /// Records a suggested transfer as paid straight from the row — no sheet.
-    /// The ledger recomputes and the transfer drops off the suggested list.
-    private func record(_ transfer: Transfer) {
-        // Rows can outlive the plan they came from — a double-tap before the
-        // re-render, or a remote merge that already settled this debt. Recording
-        // again would duplicate the Settlement and flip the balance the other way.
-        guard group.suggestedTransfers.contains(transfer) else { return }
-        withAnimation {
-            let settlement = Settlement(context: context,
-                                        from: group.member(id: transfer.from),
-                                        to: group.member(id: transfer.to),
-                                        amountMinorUnits: transfer.minorUnits,
-                                        method: .other)
-            settlement.group = group
-            try? context.save()
-        }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 }
 

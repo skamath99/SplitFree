@@ -198,13 +198,21 @@ final class IssueRegressionTests: XCTestCase {
         row.buttons.firstMatch.tap()
     }
 
-    /// Opens Members, long-presses a member, and taps "This is me".
+    /// Opens Members, long-presses a member, and taps "This is me". Waits for
+    /// the sheet to finish animating in before the long-press — pressing while
+    /// it slides up opens no context menu.
     private func claimAsMe(_ name: String) {
         app.openGroupOverflowMenu()
         app.buttons["Members"].tap()
+        XCTAssertTrue(app.navigationBars["Members"].waitForExistence(timeout: 5))
         let row = app.cells.containing(.staticText, identifier: name).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        row.press(forDuration: 1.0)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5)) // let the sheet settle
+        row.press(forDuration: 1.2)
+        if !app.buttons["This is me"].waitForExistence(timeout: 3) {
+            row.press(forDuration: 1.2) // retry once if the press raced the animation
+        }
+        XCTAssertTrue(app.buttons["This is me"].waitForExistence(timeout: 3))
         app.buttons["This is me"].tap()
         app.buttons["Done"].tap()
     }
