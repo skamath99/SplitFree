@@ -189,6 +189,23 @@ final class PersistenceController {
         return share.currentUserParticipant == share.owner
     }
 
+    /// Programmatic share acceptance from a raw invite URL — the path UI tests
+    /// use, since tapping an icloud.com share link doesn't work on simulators.
+    func acceptShare(from url: URL) async {
+        let log = Logger(subsystem: "com.sank.splitfree", category: "sharing")
+        guard isCloudBacked else {
+            log.log("acceptShare skipped: not cloud-backed")
+            return
+        }
+        log.log("acceptShare: fetching metadata for \(url.absoluteString, privacy: .public)")
+        do {
+            let metadata = try await CKContainer(identifier: Self.cloudKitContainerID).shareMetadata(for: url)
+            accept(metadata)
+        } catch {
+            log.error("acceptShare failed: \(error, privacy: .public)")
+        }
+    }
+
     func accept(_ metadata: CKShare.Metadata) {
         guard let sharedStore else { return }
         container.acceptShareInvitations(from: [metadata], into: sharedStore) { _, error in

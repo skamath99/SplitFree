@@ -312,12 +312,47 @@ struct ClaimMemberView: View {
     @State private var newName = ""
     @State private var joinError: String?
 
+    // An imported Member sets its inverse (member.group = group); that does not
+    // reliably fire the group's objectWillChange, so @ObservedObject group can
+    // stay empty after the members import lands. Fetch members directly so
+    // context inserts are observed and the list fills in live once they arrive.
+    @FetchRequest private var members: FetchedResults<Member>
+
+    init(group: SpendingGroup, onClaimed: @escaping () -> Void) {
+        self.group = group
+        self.onClaimed = onClaimed
+        let request = NSFetchRequest<Member>(entityName: "Member")
+        request.predicate = NSPredicate(format: "group == %@", group)
+        request.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+        _members = FetchRequest(fetchRequest: request, animation: .default)
+    }
+
+    // Same ordering as SpendingGroup.sortedMembers, over the observed fetch.
+    private var sortedMembers: [Member] {
+        members.sorted { ($0.isMe ? 0 : 1, $0.name) < ($1.isMe ? 0 : 1, $1.name) }
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                if !group.sortedMembers.isEmpty {
+                // A shared group always has at least one member (the owner), so
+                // an empty list here can only mean the members import hasn't
+                // finished. Show a loading state instead of the "Not in the list?"
+                // join section, which would otherwise tempt the person to re-add
+                // themselves and duplicate the member a friend already made.
+                if sortedMembers.isEmpty {
                     Section {
-                        ForEach(group.sortedMembers) { member in
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text("Loading members…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } footer: {
+                        Text("This group is still syncing. Your name will appear here in a moment.")
+                    }
+                } else {
+                    Section {
+                        ForEach(sortedMembers) { member in
                             let taken = member.isClaimedByAnotherDevice
                             Button {
                                 CurrentUser.claim(member)
@@ -350,17 +385,17 @@ struct ClaimMemberView: View {
                     } footer: {
                         Text("If someone already added you, choose that name so existing expenses stay yours. Names marked Claimed are already taken by other group members.")
                     }
-                }
-                Section("Not in the list?") {
-                    HStack {
-                        TextField("Your name", text: $newName)
-                        Button("Join") { join() }
-                            .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                    if let joinError {
-                        Text(joinError)
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                    Section("Not in the list?") {
+                        HStack {
+                            TextField("Your name", text: $newName)
+                            Button("Join") { join() }
+                                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                        if let joinError {
+                            Text(joinError)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
                     }
                 }
             }
@@ -374,7 +409,7 @@ struct ClaimMemberView: View {
     private func join() {
         let trimmed = newName.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
-        if let existing = group.sortedMembers.first(where: {
+        if let existing = sortedMembers.first(where: {
             $0.name.caseInsensitiveCompare(trimmed) == .orderedSame
         }) {
             joinError = existing.isClaimedByAnotherDevice

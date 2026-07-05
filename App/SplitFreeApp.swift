@@ -11,6 +11,17 @@ struct SplitFreeApp: App {
     init() {
         CurrentUser.handleLaunchArguments()
         RecurrenceService.materializeDueExpenses(context: persistence.container.viewContext)
+
+        #if DEBUG
+        let arguments = CommandLine.arguments
+        if let index = arguments.firstIndex(of: "--accept-share-url"),
+           index + 1 < arguments.count,
+           let url = URL(string: arguments[index + 1]) {
+            Logger(subsystem: "com.sank.splitfree", category: "sharing")
+                .log("Received --accept-share-url \(url.absoluteString, privacy: .public)")
+            Task { await PersistenceController.shared.acceptShare(from: url) }
+        }
+        #endif
     }
 
     var body: some Scene {
