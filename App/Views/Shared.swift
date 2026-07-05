@@ -1,5 +1,34 @@
 import SwiftUI
+import CoreData
 import SplitCore
+
+/// Re-renders ledger-derived UI (balances, suggested transfers, totals) when
+/// anything in the view context changes. Group balances are computed from
+/// Expense/ExpenseShare/Settlement objects, so edits to those — or remote
+/// CloudKit merges — never touch the SpendingGroup row itself and would
+/// otherwise leave @ObservedObject group views stale.
+///
+/// It also republishes on CurrentUser.didChange: per-device "who am I" claims
+/// live in UserDefaults, not Core Data, so they emit no context change and
+/// need their own signal to refresh the "You owe/are owed" perspective.
+final class LedgerRefresher: ObservableObject {
+    private var observers: [NSObjectProtocol] = []
+
+    init() {
+        let center = NotificationCenter.default
+        let refresh: (Notification) -> Void = { [weak self] _ in self?.objectWillChange.send() }
+        observers.append(center.addObserver(
+            forName: .NSManagedObjectContextObjectsDidChange,
+            object: PersistenceController.shared.container.viewContext,
+            queue: .main, using: refresh))
+        observers.append(center.addObserver(
+            forName: CurrentUser.didChange, object: nil, queue: .main, using: refresh))
+    }
+
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
+}
 
 extension Int {
     func asMoney(_ currencyCode: String) -> String {

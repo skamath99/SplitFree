@@ -7,6 +7,7 @@ import OSLog
 struct GroupDetailView: View {
     @Environment(\.managedObjectContext) private var context
     @ObservedObject var group: SpendingGroup
+    @StateObject private var ledger = LedgerRefresher()
     @State private var showingAddExpense = false
     @State private var showingSettleUp = false
     @State private var showingMembers = false
@@ -362,10 +363,10 @@ struct MembersView: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var group: SpendingGroup
+    @StateObject private var ledger = LedgerRefresher()
     @State private var newName = ""
     @State private var memberToRename: Member?
     @State private var renameText = ""
-    @State private var claimRefresh = 0
 
     var body: some View {
         NavigationStack {
@@ -387,7 +388,6 @@ struct MembersView: View {
                         .contextMenu {
                             Button("This is me", systemImage: "person.crop.circle.badge.checkmark") {
                                 CurrentUser.claim(member)
-                                claimRefresh += 1
                             }
                             Button("Rename", systemImage: "pencil") {
                                 renameText = member.name
@@ -416,7 +416,6 @@ struct MembersView: View {
                     Text("Members with recorded expenses can't be removed, to keep history intact.")
                 }
             }
-            .id(claimRefresh)
             .navigationTitle("Members")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -7,14 +7,13 @@ import SplitCore
 /// SplitFree never moves money and can't verify that a transfer happened:
 /// Apple exposes no public API for sending or confirming person-to-person
 /// Apple Cash payments (PassKit is for paying merchants and requires a
-/// payment processor). So the app stays neutral about how people pay —
-/// a share button hands the request to whatever tool they choose — and a
+/// payment processor). So the app stays neutral about how people pay, and a
 /// payment is only recorded when the user explicitly marks it as paid.
 struct SettleUpView: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var group: SpendingGroup
-    @State private var recordingTransfer: Transfer?
+    @StateObject private var ledger = LedgerRefresher()
     @State private var showingManualPayment = false
 
     var body: some View {
@@ -28,7 +27,7 @@ struct SettleUpView: View {
                     Section {
                         ForEach(Array(group.suggestedTransfers.enumerated()), id: \.offset) { _, transfer in
                             TransferRow(group: group, transfer: transfer) {
-                                recordingTransfer = transfer
+                                record(transfer)
                             }
                         }
                     } header: {
@@ -70,17 +69,29 @@ struct SettleUpView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(item: $recordingTransfer) { transfer in
-                RecordPaymentView(group: group,
-                                  fromID: transfer.from,
-                                  toID: transfer.to,
-                                  amount: Money(minorUnits: transfer.minorUnits,
-                                                currencyCode: group.currencyCode).decimalValue)
-            }
             .sheet(isPresented: $showingManualPayment) {
                 RecordPaymentView(group: group)
             }
         }
+    }
+
+    /// Records a suggested transfer as paid straight from the row — no sheet.
+    /// The ledger recomputes and the transfer drops off the suggested list.
+    private func record(_ transfer: Transfer) {
+        // Rows can outlive the plan they came from — a double-tap before the
+        // re-render, or a remote merge that already settled this debt. Recording
+        // again would duplicate the Settlement and flip the balance the other way.
+        guard group.suggestedTransfers.contains(transfer) else { return }
+        withAnimation {
+            let settlement = Settlement(context: context,
+                                        from: group.member(id: transfer.from),
+                                        to: group.member(id: transfer.to),
+                                        amountMinorUnits: transfer.minorUnits,
+                                        method: .other)
+            settlement.group = group
+            try? context.save()
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 }
 
@@ -91,50 +102,32 @@ extension Transfer: Identifiable {
 private struct TransferRow: View {
     let group: SpendingGroup
     let transfer: Transfer
-    let onRecord: () -> Void
+    let onMarkPaid: () -> Void
 
     private var fromMember: Member? { group.member(id: transfer.from) }
     private var toMember: Member? { group.member(id: transfer.to) }
     private var amountText: String { transfer.minorUnits.asMoney(group.currencyCode) }
-    private var involvesMe: Bool {
-        fromMember?.isMe == true || toMember?.isMe == true
-    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                if let fromMember { MemberAvatar(member: fromMember, size: 28) }
-                Image(systemName: "arrow.right")
-                    .font(.caption).foregroundStyle(.secondary)
-                if let toMember { MemberAvatar(member: toMember, size: 28) }
-                Text("\(fromMember?.displayName ?? "?") pays \(toMember?.displayName ?? "?")")
-                    .font(.subheadline)
-                Spacer()
-                Text(amountText).font(.headline)
+        HStack {
+            if let fromMember { MemberAvatar(member: fromMember, size: 28) }
+            Image(systemName: "arrow.right")
+                .font(.caption).foregroundStyle(.secondary)
+            if let toMember { MemberAvatar(member: toMember, size: 28) }
+            Text("\(fromMember?.displayName ?? "?") pays \(toMember?.displayName ?? "?")")
+                .font(.subheadline)
+            Spacer()
+            Text(amountText).font(.headline)
+            // Tap-to-settle bubble, Reminders-style: confirms the money moved.
+            Button(action: onMarkPaid) {
+                Image(systemName: "circle")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
             }
-            HStack {
-                if involvesMe {
-                    ShareLink(item: shareText) {
-                        Label("Share request", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-                Button("Mark as paid", systemImage: "checkmark.circle", action: onRecord)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Mark as paid")
         }
         .padding(.vertical, 4)
-    }
-
-    /// Tool-agnostic settle-up text for the share sheet — the user picks
-    /// Messages, Venmo, mail, or anything else themselves.
-    private var shareText: String {
-        let paying = fromMember?.isMe == true
-        return paying
-            ? "Sending you \(amountText) to settle up for \(group.name)."
-            : "Settle-up request: \(amountText) for \(group.name)."
     }
 }
 

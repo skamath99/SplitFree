@@ -55,6 +55,7 @@ struct GroupsListView: View {
 
 private struct GroupRow: View {
     @ObservedObject var group: SpendingGroup
+    @StateObject private var ledger = LedgerRefresher()
 
     var body: some View {
         HStack(spacing: 12) {

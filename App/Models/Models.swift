@@ -127,11 +127,16 @@ final class Member: NSManagedObject, Identifiable {
 enum CurrentUser {
     private static let key = "currentUserMemberIDs" // [groupID: memberID]
 
+    /// Claims change per-device "who am I" but touch no Core Data, so views
+    /// derived from it need their own refresh signal (see LedgerRefresher).
+    static let didChange = Notification.Name("CurrentUserDidChange")
+
     static func claim(_ member: Member) {
         guard let groupID = member.group?.id else { return }
         var map = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
         map[groupID.uuidString] = member.id.uuidString
         UserDefaults.standard.set(map, forKey: key)
+        NotificationCenter.default.post(name: didChange, object: nil)
     }
 
     static func isMe(_ member: Member) -> Bool {
