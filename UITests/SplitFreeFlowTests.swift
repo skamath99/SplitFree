@@ -1,5 +1,9 @@
 import XCTest
 
+/// End-to-end happy path: create a group, add an expense, settle up, and
+/// confirm everything survives a relaunch. Also covers issue #3 — the
+/// settle-up bubble records a payment directly (no sheet) and the suggested
+/// list refreshes both ways when a payment is added and deleted.
 final class SplitFreeFlowTests: XCTestCase {
     var app: XCUIApplication!
 
@@ -25,10 +29,26 @@ final class SplitFreeFlowTests: XCTestCase {
         XCTAssertEqual(recordButtons.count, 2)
         recordButtons.firstMatch.tap()
 
-        // Record sheet is prefilled; save it.
-        let saveButton = app.buttons["Save"]
-        XCTAssertTrue(saveButton.waitForExistence(timeout: 5))
-        saveButton.tap()
+        // Tapping the bubble records the payment directly — no sheet (issue #3).
+        // One debt is settled, so it lands in history and a single suggestion
+        // remains.
+        XCTAssertTrue(app.staticTexts["Past payments"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Save"].exists) // no RecordPayment sheet was presented
+        XCTAssertEqual(app.buttons.matching(identifier: "Mark as paid").count, 1)
+
+        // Deleting the recorded payment brings the suggestion back — the list
+        // refreshes both ways. The "Other · <date>" subtitle is unique to
+        // past-payment rows.
+        let paymentRow = app.cells.containing(
+            NSPredicate(format: "label CONTAINS 'Other'")).firstMatch
+        paymentRow.swipeLeft()
+        XCTAssertTrue(app.buttons["Delete"].waitForExistence(timeout: 3))
+        app.buttons["Delete"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Suggested payments"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "Mark as paid").count, 2)
+
+        // Re-record one payment so the persistence check below sees exactly one.
+        app.buttons.matching(identifier: "Mark as paid").firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Past payments"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
 
