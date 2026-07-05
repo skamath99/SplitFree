@@ -56,13 +56,17 @@ public enum ReceiptParser {
 
     // Footer keywords checked against a row's name text, most specific first.
     private static let subtotalKeywords = ["subtotal", "sub total", "sub-total"]
-    private static let taxKeywords = ["tax", "vat", "gst", "hst"]
+    // "mwst" is the German/Swiss VAT marker (Mehrwertsteuer).
+    private static let taxKeywords = ["tax", "vat", "gst", "hst", "mwst"]
     private static let tipKeywords = ["tip", "gratuity", "service charge", "service fee"]
-    private static let totalKeywords = ["total", "amount due", "balance due", "to pay"]
-    // Rows that carry an amount but aren't part of the bill.
+    // "lotal" catches Vision's frequent T→l misread of "Total".
+    private static let totalKeywords = ["total", "lotal", "amount due", "balance due", "to pay"]
+    // Rows that carry an amount but aren't part of the bill. "entspricht"
+    // ("corresponds to …") is the currency-conversion line on German receipts;
+    // we don't ignore bare "euro" so genuine EUR receipts still parse.
     private static let ignoreKeywords = ["cash", "change", "card", "visa", "mastercard",
                                          "amex", "debit", "credit", "payment", "tender",
-                                         "auth", "approved"]
+                                         "auth", "approved", "entspricht"]
 
     public static func parse(lines: [ScannedLine]) -> ScannedReceipt {
         var receipt = ScannedReceipt()

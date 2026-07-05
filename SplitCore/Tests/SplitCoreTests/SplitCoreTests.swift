@@ -253,4 +253,36 @@ final class ReceiptParserTests: XCTestCase {
         XCTAssertEqual(candidates.first, Decimal(string: "10.05"))
         XCTAssertTrue(candidates.contains(Decimal(string: "9.25")!))
     }
+
+    /// A Swiss receipt as Vision garbles it: "Total" misread as "lotal", a
+    /// German VAT (MwSt) line, and a EUR-conversion ("Entspricht") line — each
+    /// carries an amount that would otherwise become a bogus item or inflate
+    /// the total (the real bug: effectiveTotal came out 149.18 on a 54.50 bill).
+    private var swissReceipt: [ScannedLine] {
+        var lines: [ScannedLine] = []
+        lines += row("Rösti", "9.00", y: 0.20)
+        lines += row("Suppe", "5.00", y: 0.24)
+        lines += row("Fondue", "22.00", y: 0.28)
+        lines += row("Wein", "18.50", y: 0.32)
+        lines += [ScannedLine(text: "Incl. 7.6% MwSt 54.50 CHF: 3.85",
+                              x: 0.05, y: 0.44, height: 0.02)]
+        lines += row("lotal", "54.50", y: 0.48)
+        lines += [ScannedLine(text: "Entspricht in Euro 36.33 EUR",
+                              x: 0.05, y: 0.52, height: 0.02)]
+        return lines
+    }
+
+    func testSwissReceiptOcrQuirks() {
+        let receipt = ReceiptParser.parse(lines: swissReceipt)
+        XCTAssertEqual(receipt.items, [
+            ScannedItem(name: "Rösti", amount: 9),
+            ScannedItem(name: "Suppe", amount: 5),
+            ScannedItem(name: "Fondue", amount: 22),
+            ScannedItem(name: "Wein", amount: Decimal(string: "18.50")!),
+        ])
+        XCTAssertEqual(receipt.itemsSum, Decimal(string: "54.50"))
+        XCTAssertEqual(receipt.total, Decimal(string: "54.50"))
+        XCTAssertEqual(receipt.tax, Decimal(string: "3.85"))
+        XCTAssertEqual(receipt.effectiveTotal, Decimal(string: "54.50"))
+    }
 }
