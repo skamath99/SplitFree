@@ -92,6 +92,58 @@ final class IssueRegressionTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["You are owed $80.00"].waitForExistence(timeout: 5))
     }
 
+    // MARK: - Exclusive name claims
+
+    /// A name claimed by one participant can't be claimed by another, and every
+    /// participant can see which names are still unclaimed.
+    func testClaimExclusivityAndVisibility() throws {
+        try app.createTahoeTrip(withDinner: false) // Sam = you/claimed, Alice, Bob
+
+        // As the creator, Sam is claimed; Alice and Bob are not.
+        app.openGroupOverflowMenu()
+        app.buttons["Members"].tap()
+        XCTAssertTrue(app.navigationBars["Members"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts.matching(identifier: "Not claimed yet").count, 2)
+        app.buttons["Done"].tap()
+
+        // Relaunch as a different person on the same data: the gate must appear.
+        app.terminate()
+        app.launchArguments = ["--local-store", "--forget-device"]
+        app.launch()
+        app.cells.staticTexts["Tahoe Trip"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Who are you?"].waitForExistence(timeout: 5))
+
+        // Gate rows are Buttons; the background GroupDetailView's cells leak
+        // into the a11y tree under the fullScreenCover, so target buttons only.
+        // Sam is taken, so Sam's gate button is disabled.
+        let samButton = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Sam'")).firstMatch
+        XCTAssertTrue(samButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(samButton.isEnabled)
+
+        // Joining as "Sam" is rejected with the "already claimed" error.
+        let nameField = app.textFields["Your name"]
+        nameField.tap()
+        nameField.typeText("Sam")
+        app.buttons["Join"].tap()
+        XCTAssertTrue(app.staticTexts["That name is already claimed."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Who are you?"].exists)
+
+        // Settle the layout before tapping a member row: keyboard-avoidance
+        // shifts the list while the keyboard is up.
+        app.keyboards.buttons["Return"].tap()
+
+        // Claiming Alice dismisses the gate.
+        app.buttons.matching(NSPredicate(format: "label CONTAINS 'Alice'")).firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Who are you?"].waitForNonExistence(timeout: 5))
+
+        // Now only Bob is unclaimed.
+        app.openGroupOverflowMenu()
+        app.buttons["Members"].tap()
+        XCTAssertTrue(app.navigationBars["Members"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts.matching(identifier: "Not claimed yet").count, 1)
+        app.buttons["Done"].tap()
+    }
+
     // MARK: - Receipt scan
     //
     // Precondition: the runner simulator's photo library contains a receipt

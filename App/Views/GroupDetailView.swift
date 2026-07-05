@@ -100,6 +100,7 @@ struct GroupDetailView: View {
             Text("Send it to your friends — anyone with the link can join this group.")
         }
         .onAppear {
+            CurrentUser.backfillSyncedClaim(in: group)
             needsClaim = !CurrentUser.hasClaim(in: group)
         }
         .fullScreenCover(isPresented: $needsClaim) {
@@ -309,6 +310,7 @@ struct ClaimMemberView: View {
     @ObservedObject var group: SpendingGroup
     let onClaimed: () -> Void
     @State private var newName = ""
+    @State private var joinError: String?
 
     var body: some View {
         NavigationStack {
@@ -316,6 +318,7 @@ struct ClaimMemberView: View {
                 if !group.sortedMembers.isEmpty {
                     Section {
                         ForEach(group.sortedMembers) { member in
+                            let taken = member.isClaimedByAnotherDevice
                             Button {
                                 CurrentUser.claim(member)
                                 onClaimed()
@@ -324,40 +327,67 @@ struct ClaimMemberView: View {
                                     MemberAvatar(member: member, size: 30)
                                     Text(member.name)
                                     Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.tertiary)
+                                    if taken {
+                                        Text("Claimed")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
                                 }
+                                .opacity(taken ? 0.5 : 1)
+                                // Plain-style buttons only hit-test opaque label
+                                // content, so the Spacer is a dead zone without this.
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .disabled(taken)
                         }
                     } header: {
                         Text("Pick your name")
                     } footer: {
-                        Text("If someone already added you, choose that name so existing expenses stay yours.")
+                        Text("If someone already added you, choose that name so existing expenses stay yours. Names marked Claimed are already taken by other group members.")
                     }
                 }
                 Section("Not in the list?") {
                     HStack {
                         TextField("Your name", text: $newName)
-                        Button("Join") {
-                            let trimmed = newName.trimmingCharacters(in: .whitespaces)
-                            guard !trimmed.isEmpty else { return }
-                            let member = Member(context: context, name: trimmed,
-                                                colorHue: Double.random(in: 0...1))
-                            member.group = group
-                            try? context.save()
-                            CurrentUser.claim(member)
-                            onClaimed()
-                        }
-                        .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                        Button("Join") { join() }
+                            .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    if let joinError {
+                        Text(joinError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
             }
             .navigationTitle("Who are you?")
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: newName) { joinError = nil }
         }
         .interactiveDismissDisabled()
+    }
+
+    private func join() {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        if let existing = group.sortedMembers.first(where: {
+            $0.name.caseInsensitiveCompare(trimmed) == .orderedSame
+        }) {
+            joinError = existing.isClaimedByAnotherDevice
+                ? "That name is already claimed."
+                : "That name is already in the group — pick it from the list above."
+            return
+        }
+        let member = Member(context: context, name: trimmed,
+                            colorHue: Double.random(in: 0...1))
+        member.group = group
+        try? context.save()
+        CurrentUser.claim(member)
+        onClaimed()
     }
 }
 
@@ -377,11 +407,22 @@ struct MembersView: View {
                     ForEach(group.sortedMembers) { member in
                         HStack {
                             MemberAvatar(member: member, size: 30)
-                            Text(member.displayName)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(member.displayName)
+                                if !member.isClaimed {
+                                    Text("Not claimed yet")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                             if member.isMe {
                                 Image(systemName: "checkmark.seal.fill")
                                     .font(.caption)
                                     .foregroundStyle(.tint)
+                            } else if member.isClaimedByAnotherDevice {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                             Spacer()
                             BalancePill(minorUnits: group.balances[member.id] ?? 0,
@@ -391,6 +432,7 @@ struct MembersView: View {
                             Button("This is me", systemImage: "person.crop.circle.badge.checkmark") {
                                 CurrentUser.claim(member)
                             }
+                            .disabled(member.isClaimedByAnotherDevice)
                             Button("Rename", systemImage: "pencil") {
                                 renameText = member.name
                                 memberToRename = member
@@ -398,7 +440,7 @@ struct MembersView: View {
                         }
                     }
                 } footer: {
-                    Text("The checkmark shows which member is you on this device. Touch and hold a member to rename them.")
+                    Text("A tinted seal marks who you are on this device; a grey seal marks a member another person has claimed. \"Not claimed yet\" means no one has picked that name. Touch and hold a member to rename them.")
                 }
                 Section {
                     HStack {

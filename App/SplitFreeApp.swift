@@ -9,6 +9,7 @@ struct SplitFreeApp: App {
     private let persistence = PersistenceController.shared
 
     init() {
+        CurrentUser.handleLaunchArguments()
         RecurrenceService.materializeDueExpenses(context: persistence.container.viewContext)
     }
 

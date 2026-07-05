@@ -88,6 +88,9 @@ final class Member: NSManagedObject, Identifiable {
     /// for seeding, but "who am I" is answered per-device by CurrentUser —
     /// in a shared group this flag belongs to someone else's device.
     @NSManaged var isCurrentUser: Bool
+    /// Synced across CloudKit so every participant sees which names are taken.
+    /// Holds the claiming device's CurrentUser.deviceID.
+    @NSManaged var claimedByDeviceID: String?
     @NSManaged var colorHue: Double
     @NSManaged var group: SpendingGroup?
     @NSManaged var lineItems: Set<LineItem>?
@@ -112,6 +115,11 @@ final class Member: NSManagedObject, Identifiable {
     /// Whether this member is the person holding the device.
     var isMe: Bool { CurrentUser.isMe(self) }
 
+    var isClaimed: Bool { claimedByDeviceID != nil }
+    var isClaimedByAnotherDevice: Bool {
+        claimedByDeviceID != nil && claimedByDeviceID != CurrentUser.deviceID
+    }
+
     /// Always the real name: in a shared group, a "You" label would be
     /// somebody else on every other participant's device.
     var displayName: String { name }
@@ -126,24 +134,48 @@ final class Member: NSManagedObject, Identifiable {
 /// "You" on their own device and someone else on everyone else's.
 enum CurrentUser {
     private static let key = "currentUserMemberIDs" // [groupID: memberID]
+    private static let deviceIDKey = "currentUserDeviceID"
 
     /// Claims change per-device "who am I" but touch no Core Data, so views
     /// derived from it need their own refresh signal (see LedgerRefresher).
     static let didChange = Notification.Name("CurrentUserDidChange")
+
+    /// Stable per-install identifier, minted on first read. Written into
+    /// Member.claimedByDeviceID so participants can tell claimed names apart.
+    static var deviceID: String {
+        if let existing = UserDefaults.standard.string(forKey: deviceIDKey) {
+            return existing
+        }
+        let generated = UUID().uuidString
+        UserDefaults.standard.set(generated, forKey: deviceIDKey)
+        return generated
+    }
 
     static func claim(_ member: Member) {
         guard let groupID = member.group?.id else { return }
         var map = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
         map[groupID.uuidString] = member.id.uuidString
         UserDefaults.standard.set(map, forKey: key)
+
+        // A re-claim moves this device's synced claim off any prior member.
+        let device = deviceID
+        for other in member.group?.members ?? [] where other.claimedByDeviceID == device {
+            other.claimedByDeviceID = nil
+        }
+        member.claimedByDeviceID = device
+        try? member.managedObjectContext?.save()
+
         NotificationCenter.default.post(name: didChange, object: nil)
     }
 
     static func isMe(_ member: Member) -> Bool {
         guard let groupID = member.group?.id else { return member.isCurrentUser }
         let map = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
-        if let claimed = map[groupID.uuidString] {
-            return claimed == member.id.uuidString
+        if let claimed = map[groupID.uuidString], claimed == member.id.uuidString {
+            // A remote device may have won this name while our map still points
+            // at it: only trust the local claim if the synced field agrees (nil
+            // = legacy, not yet backfilled).
+            return member.claimedByDeviceID == nil || member.claimedByDeviceID == deviceID
         }
         // No claim on this device (e.g. a group someone shared with us and
         // we haven't picked ourselves yet): nobody is "You".
@@ -152,7 +184,32 @@ enum CurrentUser {
 
     static func hasClaim(in group: SpendingGroup) -> Bool {
         let map = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
-        return map[group.id.uuidString] != nil
+        guard let memberID = map[group.id.uuidString],
+              let member = (group.members ?? []).first(where: { $0.id.uuidString == memberID })
+        else { return false }
+        // Stale/beaten entries → false, so the "Who are you?" gate reappears.
+        return member.claimedByDeviceID == nil || member.claimedByDeviceID == deviceID
+    }
+
+    /// Migrates a pre-feature per-device claim into the synced field so other
+    /// participants see it.
+    static func backfillSyncedClaim(in group: SpendingGroup) {
+        let map = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        guard let memberID = map[group.id.uuidString],
+              let member = (group.members ?? []).first(where: { $0.id.uuidString == memberID }),
+              member.claimedByDeviceID == nil
+        else { return }
+        member.claimedByDeviceID = deviceID
+        try? member.managedObjectContext?.save()
+    }
+
+    /// UI-test hook: forgets this "device" so a relaunch acts as a second
+    /// person on the same data.
+    static func handleLaunchArguments() {
+        if CommandLine.arguments.contains("--forget-device") {
+            UserDefaults.standard.removeObject(forKey: key)
+            UserDefaults.standard.removeObject(forKey: deviceIDKey)
+        }
     }
 }
 

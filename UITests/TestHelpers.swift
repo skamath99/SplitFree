@@ -5,7 +5,8 @@ extension XCUIApplication {
     /// first listed member so the test can proceed.
     func claimFirstMemberIfAsked() {
         if navigationBars["Who are you?"].waitForExistence(timeout: 3) {
-            cells.firstMatch.tap()
+            // Skip disabled "Claimed" rows — tapping one is inert and hangs.
+            cells.matching(NSPredicate(format: "enabled == true")).firstMatch.tap()
         }
     }
 
