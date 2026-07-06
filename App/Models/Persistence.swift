@@ -189,6 +189,28 @@ final class PersistenceController {
         return share.currentUserParticipant == share.owner
     }
 
+    /// A participant "deleting" a shared group must LEAVE it, not delete it:
+    /// with read-write access their local `context.delete` would export and
+    /// destroy the group in the owner's zone for everyone (confirmed against
+    /// production). `purgeObjectsAndRecordsInZone` on the shared store is the
+    /// documented way for a participant to stop participating — it drops only
+    /// this device's mirror of the zone, without exporting deletions.
+    func leave(group: SpendingGroup) async throws {
+        guard let sharedStore,
+              let zoneID = existingShare(for: group)?.recordID.zoneID else {
+            throw CocoaError(.persistentStoreOperation)
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            container.purgeObjectsAndRecordsInZone(with: zoneID, in: sharedStore) { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
     /// Diagnostic: fetches and logs a share's metadata WITHOUT accepting —
     /// safe against live shares (read-only), works even with --local-store.
     func probeShare(from url: URL) async {
@@ -211,10 +233,37 @@ final class PersistenceController {
         }
         log.log("acceptShare: fetching metadata for \(url.absoluteString, privacy: .public)")
         do {
-            let metadata = try await CKContainer(identifier: Self.cloudKitContainerID).shareMetadata(for: url)
+            let metadata = try await Self.fetchShareMetadata(for: url)
             accept(metadata)
         } catch {
             log.error("acceptShare failed: \(error, privacy: .public)")
+        }
+    }
+
+    /// The async `shareMetadata(for:)` convenience runs at background QoS and
+    /// starves indefinitely behind a sync backlog (a launch-time import of many
+    /// zones queues ahead of it in cloudd). An explicit user-initiated
+    /// operation jumps that queue — acceptance is the thing the user is
+    /// actively waiting on.
+    private static func fetchShareMetadata(for url: URL) async throws -> CKShare.Metadata {
+        try await withCheckedThrowingContinuation { continuation in
+            let operation = CKFetchShareMetadataOperation(shareURLs: [url])
+            operation.qualityOfService = .userInitiated
+            var fetched: CKShare.Metadata?
+            operation.perShareMetadataResultBlock = { _, result in
+                if case .success(let metadata) = result { fetched = metadata }
+            }
+            operation.fetchShareMetadataResultBlock = { result in
+                switch (result, fetched) {
+                case (.failure(let error), _):
+                    continuation.resume(throwing: error)
+                case (.success, .some(let metadata)):
+                    continuation.resume(returning: metadata)
+                case (.success, .none):
+                    continuation.resume(throwing: CKError(.unknownItem))
+                }
+            }
+            CKContainer(identifier: cloudKitContainerID).add(operation)
         }
     }
 

@@ -6,6 +6,9 @@ struct GroupsListView: View {
     @FetchRequest(fetchRequest: SpendingGroup.fetchAll(), animation: .default)
     private var groups: FetchedResults<SpendingGroup>
     @State private var showingNewGroup = false
+    @State private var pendingDeletion: PendingDeletion?
+    @State private var leaveFailed = false
+    @StateObject private var syncStatus = CloudSyncStatus.shared
 
     var body: some View {
         NavigationStack {
@@ -27,8 +30,7 @@ struct GroupsListView: View {
                             }
                         }
                         .onDelete { offsets in
-                            for offset in offsets { context.delete(groups[offset]) }
-                            try? context.save()
+                            for offset in offsets { requestDeletion(of: groups[offset]) }
                         }
                     }
                 }
@@ -49,6 +51,141 @@ struct GroupsListView: View {
             .sheet(isPresented: $showingNewGroup) {
                 GroupFormView()
             }
+            .alert(pendingDeletion?.title ?? "", isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ), presenting: pendingDeletion) { pending in
+                Button(pending.confirmTitle, role: .destructive) { confirmPending(pending) }
+                Button("Cancel", role: .cancel) {}
+            } message: { pending in
+                Text(pending.message)
+            }
+            .alert("Couldn't leave the group", isPresented: $leaveFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Check your connection and try again.")
+            }
+            .safeAreaInset(edge: .top) {
+                if syncStatus.state != .healthy {
+                    SyncHealthBanner(state: syncStatus.state)
+                }
+            }
+        }
+    }
+
+    /// Routes a swipe-delete: a group shared TO you is left (not deleted, which
+    /// would export and destroy it for everyone); a group you own with a share
+    /// asks first (deleting a shared group can't be undone and hits everyone);
+    /// an unshared/local group deletes outright.
+    private func requestDeletion(of group: SpendingGroup) {
+        let controller = PersistenceController.shared
+        guard let share = controller.existingShare(for: group) else {
+            delete(group)
+            return
+        }
+        if controller.isOwner(of: group) {
+            // Ownership can't be handed off, so an owner delete is a delete for
+            // all. Link-join can understate the mirror's participant list, so
+            // always confirm when a share exists.
+            let others = share.participants.filter { $0 != share.owner }.count
+            pendingDeletion = .ownerDelete(group, others: others)
+        } else {
+            pendingDeletion = .leave(group)
+        }
+    }
+
+    private func confirmPending(_ pending: PendingDeletion) {
+        switch pending {
+        case .leave(let group):
+            Task {
+                do { try await PersistenceController.shared.leave(group: group) }
+                catch { leaveFailed = true }
+            }
+        case .ownerDelete(let group, _):
+            delete(group)
+        }
+    }
+
+    private func delete(_ group: SpendingGroup) {
+        context.delete(group)
+        try? context.save()
+    }
+}
+
+/// Non-blocking warning shown above the list when iCloud can't sync. Only
+/// rendered for non-healthy states, so `.healthy` needs no copy.
+private struct SyncHealthBanner: View {
+    let state: CloudSyncStatus.State
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+            Text(message)
+            Spacer(minLength: 0)
+        }
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+        .padding(.top, 4)
+        .accessibilityIdentifier("SyncHealthBanner")
+    }
+
+    private var symbol: String {
+        switch state {
+        case .storageFull: return "exclamationmark.icloud"
+        default: return "icloud.slash"
+        }
+    }
+
+    private var message: String {
+        switch state {
+        case .noAccount: return "Sign in to iCloud to sync and share groups."
+        case .unavailable: return "iCloud is temporarily unavailable. Syncing is paused."
+        case .storageFull: return "Your iCloud storage is full. Changes aren't syncing."
+        case .healthy: return ""
+        }
+    }
+}
+
+private enum PendingDeletion: Identifiable {
+    case leave(SpendingGroup)
+    case ownerDelete(SpendingGroup, others: Int)
+
+    var group: SpendingGroup {
+        switch self {
+        case .leave(let group), .ownerDelete(let group, _): return group
+        }
+    }
+    var id: NSManagedObjectID { group.objectID }
+
+    var title: String {
+        switch self {
+        case .leave: return "Leave this group?"
+        case .ownerDelete: return "Delete for everyone?"
+        }
+    }
+
+    var confirmTitle: String {
+        switch self {
+        case .leave: return "Leave"
+        case .ownerDelete: return "Delete for everyone"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .leave:
+            return "You'll stop seeing this group, but your expenses stay in it for everyone else."
+        case .ownerDelete(_, let others):
+            guard others > 0 else {
+                return "You shared this group. Deleting it removes it from any device it was shared to — this can't be undone."
+            }
+            let people = others == 1 ? "1 other person is" : "\(others) other people are"
+            return "\(people) in this group. Deleting it removes it from their devices too — this can't be undone."
         }
     }
 }

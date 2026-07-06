@@ -48,7 +48,7 @@ run_test() { # udid test-name [ENV=val...]
         -only-testing:"SplitFreeUITests/ShareE2ETests/$test" -quiet
 }
 
-echo "=== [1/3] Owner creates '$GROUP' and copies the invite link"
+echo "=== [1/5] Owner creates '$GROUP' and copies the invite link"
 run_test "$A" testOwnerCreatesGroupAndCopiesInviteLink "TEST_RUNNER_E2E_GROUP=$GROUP"
 
 URL=$(xcrun simctl pbpaste "$A" 2>/dev/null || true)
@@ -61,17 +61,25 @@ fi
 [[ "$URL" == https://www.icloud.com/share/* ]] || { echo "FAIL: no invite URL (got: '$URL')"; exit 1; }
 echo "    invite: $URL"
 
-echo "=== [2/3] Participant accepts the invite and adds an expense"
+echo "=== [2/5] Participant accepts the invite and adds an expense"
 nudge "$B" & NUDGE_PID=$!
 trap 'kill $NUDGE_PID 2>/dev/null || true' EXIT
 run_test "$B" testParticipantJoinsAndAddsExpense \
     "TEST_RUNNER_E2E_GROUP=$GROUP" "TEST_RUNNER_E2E_SHARE_URL=$URL"
 kill $NUDGE_PID 2>/dev/null || true
 
-echo "=== [3/3] Owner sees the participant's expense"
+echo "=== [3/5] Owner sees the participant's expense"
 nudge "$A" & NUDGE_PID=$!
 run_test "$A" testOwnerSeesParticipantExpense "TEST_RUNNER_E2E_GROUP=$GROUP"
 kill $NUDGE_PID 2>/dev/null || true
+
+echo "=== [4/5] Participant leaves the group (delete-as-leave)"
+run_test "$B" testParticipantLeavesGroup "TEST_RUNNER_E2E_GROUP=$GROUP"
+
+echo "=== [5/5] Owner keeps the data, then deletes for everyone (cleanup)"
+nudge "$A" & NUDGE_PID=$!
+run_test "$A" testOwnerKeepsDataThenDeletes "TEST_RUNNER_E2E_GROUP=$GROUP"
+kill $NUDGE_PID 2>/dev/null || true
 trap - EXIT
 
-echo "PASS: create -> invite -> accept -> two-way sync all green ('$GROUP')"
+echo "PASS: create -> invite -> accept -> two-way sync -> leave -> delete all green ('$GROUP')"
