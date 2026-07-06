@@ -189,6 +189,18 @@ final class PersistenceController {
         return share.currentUserParticipant == share.owner
     }
 
+    /// Diagnostic: fetches and logs a share's metadata WITHOUT accepting —
+    /// safe against live shares (read-only), works even with --local-store.
+    func probeShare(from url: URL) async {
+        let log = Logger(subsystem: "com.sank.splitfree", category: "sharing")
+        do {
+            let metadata = try await CKContainer(identifier: Self.cloudKitContainerID).shareMetadata(for: url)
+            log.log("probeShare OK: \(String(describing: metadata), privacy: .public)")
+        } catch {
+            log.error("probeShare failed: \(error, privacy: .public)")
+        }
+    }
+
     /// Programmatic share acceptance from a raw invite URL — the path UI tests
     /// use, since tapping an icloud.com share link doesn't work on simulators.
     func acceptShare(from url: URL) async {

@@ -14,6 +14,11 @@ struct SplitFreeApp: App {
 
         #if DEBUG
         let arguments = CommandLine.arguments
+        if let index = arguments.firstIndex(of: "--probe-share-url"),
+           index + 1 < arguments.count,
+           let url = URL(string: arguments[index + 1]) {
+            Task { await PersistenceController.shared.probeShare(from: url) }
+        }
         if let index = arguments.firstIndex(of: "--accept-share-url"),
            index + 1 < arguments.count,
            let url = URL(string: arguments[index + 1]) {
